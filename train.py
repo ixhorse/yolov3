@@ -5,7 +5,8 @@ import test  # Import test.py to get mAP after each epoch
 from models import *
 from utils.datasets import *
 from utils.utils import *
-
+from utils.dataset_voc import VOCDetection
+import pdb
 
 def train(
         cfg,
@@ -29,14 +30,14 @@ def train(
     else:
         torch.backends.cudnn.benchmark = True  # unsuitable for multiscale
 
-    # Configure run
-    train_path = parse_data_cfg(data_cfg)['train']
-
     # Initialize model
     model = Darknet(cfg, img_size)
 
     # Get dataloader
-    dataloader = LoadImagesAndLabels(train_path, batch_size, img_size, multi_scale=multi_scale, augment=True)
+    train_dataset = VOCDetection(root=os.path.join('~', 'data', 'VOCdevkit'), 
+        batch_size=batch_size, img_size=img_size, multi_scale=multi_scale, augment=True)
+    dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size,
+        num_workers=4, pin_memory=True, shuffle=True, drop_last=True)
 
     lr0 = 0.001
     cutoff = -1  # backbone reaches to cutoff layer
@@ -44,8 +45,6 @@ def train(
     best_loss = float('inf')
     if resume:
         checkpoint = torch.load(latest, map_location='cpu')
-
-        # Load weights to resume from
         model.load_state_dict(checkpoint['model'])
 
         # if torch.cuda.device_count() > 1:
@@ -55,8 +54,6 @@ def train(
         # Transfer learning (train only YOLO layers)
         # for i, (name, p) in enumerate(model.named_parameters()):
         #     p.requires_grad = True if (p.shape[0] == 255) else False
-
-        # Set optimizer
         optimizer = torch.optim.SGD(filter(lambda x: x.requires_grad, model.parameters()), lr=lr0, momentum=.9)
 
         start_epoch = checkpoint['epoch'] + 1
@@ -78,33 +75,19 @@ def train(
         # if torch.cuda.device_count() > 1:
         #    model = nn.DataParallel(model)
         model.to(device).train()
-
-        # Set optimizer
         optimizer = torch.optim.SGD(filter(lambda x: x.requires_grad, model.parameters()), lr=lr0, momentum=.9)
-
-    # Set scheduler
-    # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[54, 61], gamma=0.1)
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[54, 61], gamma=0.1)
 
     # Start training
     t0 = time.time()
-    model_info(model)
-    n_burnin = min(round(dataloader.nB / 5 + 1), 1000)  # number of burn-in batches
+    # model_info(model)
+    n_burnin = min(round(train_dataset.nB / 5 + 1), 1000)  # number of burn-in batches
     for epoch in range(epochs):
         epoch += start_epoch
-
         print(('%8s%12s' + '%10s' * 7) % (
             'Epoch', 'Batch', 'xy', 'wh', 'conf', 'cls', 'total', 'nTargets', 'time'))
-
-        # Update scheduler (automatic)
-        # scheduler.step()
-
-        # Update scheduler (manual)  at 0, 54, 61 epochs to 1e-3, 1e-4, 1e-5
-        if epoch > 50:
-            lr = lr0 / 10
-        else:
-            lr = lr0
-        for g in optimizer.param_groups:
-            g['lr'] = lr
+        
+        scheduler.step()
 
         # Freeze darknet53.conv.74 for first epoch
         if freeze_backbone and (epoch < 2):
@@ -114,41 +97,37 @@ def train(
 
         ui = -1
         rloss = defaultdict(float)  # running loss
-        optimizer.zero_grad()
-        for i, (imgs, targets, _, _) in enumerate(dataloader):
-            if sum([len(x) for x in targets]) < 1:  # if no targets continue
+        
+        for i, (imgs, targets, numboxes) in enumerate(dataloader):
+            if sum(numboxes) < 1:  # if no targets continue
                 continue
-
+            imgs = imgs.float().to(device)
+            targets = [targets[i, :nL, :].float() for i,nL in enumerate(numboxes)]
+            
+            optimizer.zero_grad()
             # SGD burn-in
-            if (epoch == 0) & (i <= n_burnin):
-                lr = lr0 * (i / n_burnin) ** 4
-                for g in optimizer.param_groups:
-                    g['lr'] = lr
+            # if (epoch == 0) & (i <= n_burnin):
+            #     lr = lr0 * (i / n_burnin) ** 4
+            #     for g in optimizer.param_groups:
+            #         g['lr'] = lr
 
             # Compute loss
-            loss = model(imgs.to(device), targets, var=var)
-
-            # Compute gradient
+            loss = model(imgs, targets, var=var)
             loss.backward()
-
-            # Accumulate gradient for x batches before optimizing
-            if ((i + 1) % accumulated_batches == 0) or (i == len(dataloader) - 1):
-                optimizer.step()
-                optimizer.zero_grad()
+            optimizer.step()
 
             # Running epoch-means of tracked metrics
             ui += 1
             for key, val in model.losses.items():
                 rloss[key] = (rloss[key] * ui + val) / (ui + 1)
-
-            s = ('%8s%12s' + '%10.3g' * 7) % (
-                '%g/%g' % (epoch, epochs - 1),
-                '%g/%g' % (i, len(dataloader) - 1),
-                rloss['xy'], rloss['wh'], rloss['conf'],
-                rloss['cls'], rloss['loss'],
-                model.losses['nT'], time.time() - t0)
+            if(i % 10 == 0):
+                print(('%8s%12s' + '%10.3g' * 7) % (
+                    '%g/%g' % (epoch, epochs - 1),
+                    '%g/%g' % (i, len(dataloader) - 1),
+                    rloss['xy'], rloss['wh'], rloss['conf'],
+                    rloss['cls'], rloss['loss'],
+                    model.losses['nT'], time.time() - t0))
             t0 = time.time()
-            print(s)
 
         # Update best loss
         loss_per_target = rloss['loss'] / rloss['nT']
@@ -165,19 +144,6 @@ def train(
         # Save best checkpoint
         if best_loss == loss_per_target:
             os.system('cp ' + latest + ' ' + best)
-
-        # Save backup weights every 5 epochs (optional)
-        # if (epoch > 0) & (epoch % 5 == 0):
-        #     os.system('cp ' + latest + ' ' + weights + 'backup{}.pt'.format(epoch)))
-
-        # Calculate mAP
-        with torch.no_grad():
-            mAP, R, P = test.test(cfg, data_cfg, weights=latest, batch_size=batch_size, img_size=img_size)
-
-        # Write epoch results
-        with open('results.txt', 'a') as file:
-            file.write(s + '%11.3g' * 3 % (mAP, P, R) + '\n')
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

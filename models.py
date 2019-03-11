@@ -6,6 +6,8 @@ import torch.nn as nn
 from utils.parse_config import *
 from utils.utils import *
 
+import pdb
+
 ONNX_EXPORT = False
 
 
@@ -149,7 +151,6 @@ class YOLOLayer(nn.Module):
             # Get outputs
             p_conf = p[..., 4]  # Conf
             p_cls = p[..., 5:]  # Class
-
             txy, twh, mask, tcls = build_targets(targets, self.anchor_vec, self.nA, self.nC, nG)
 
             tcls = tcls[mask]

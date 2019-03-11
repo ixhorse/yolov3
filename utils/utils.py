@@ -8,6 +8,7 @@ import torch
 import torch.nn.functional as F
 
 from utils import torch_utils
+import pdb
 
 # Set printoptions
 torch.set_printoptions(linewidth=1320, precision=5, profile='long')
@@ -256,7 +257,6 @@ def build_targets(target, anchor_vec, nA, nC, nG):
         # iou of targets-anchors (using wh only)
         box1 = gwh
         box2 = anchor_vec.unsqueeze(1)
-
         inter_area = torch.min(box1, box2).prod(2)
         iou = inter_area / (box1.prod(1) + box2.prod(2) - inter_area + 1e-16)
 

@@ -6,12 +6,13 @@ import random
 import cv2
 import numpy as np
 import torch
+from torch.utils.data import Dataset
 
 # from torch.utils.data import Dataset
 from utils.utils import xyxy2xywh
 
 
-class LoadImages:  # for inference
+class LoadImages():  # for inference
     def __init__(self, path, img_size=416):
         if os.path.isdir(path):
             image_format = ['.jpg', '.jpeg', '.png', '.tif']
@@ -89,14 +90,12 @@ class LoadWebcam:  # for inference
         return 0
 
 
-class LoadImagesAndLabels:  # for training
-    def __init__(self, path, batch_size=1, img_size=608, multi_scale=False, augment=False):
-        with open(path, 'r') as file:
-            self.img_files = file.readlines()
-            self.img_files = [x.replace('\n', '') for x in self.img_files]
-            self.img_files = list(filter(lambda x: len(x) > 0, self.img_files))
-
-        self.label_files = [x.replace('images', 'labels').replace('.png', '.txt').replace('.jpg', '.txt')
+class LoadImagesAndLabels(Dataset):  # for training
+    def __init__(self, img_files, label_files=None, batch_size=1, 
+                 img_size=608, multi_scale=False, augment=False):
+        self.img_files = img_files
+        self.label_files = label_files if label_files else \
+                            [x.replace('images', 'labels').replace('.png', '.txt').replace('.jpg', '.txt')
                             for x in self.img_files]
 
         self.nF = len(self.img_files)  # number of image files
@@ -108,18 +107,19 @@ class LoadImagesAndLabels:  # for training
 
         assert self.nF > 0, 'No images found in %s' % path
 
-    def __iter__(self):
-        self.count = -1
-        self.shuffled_vector = np.random.permutation(self.nF) if self.augment else np.arange(self.nF)
-        return self
+    # def __iter__(self):
+    #     self.count = -1
+    #     self.shuffled_vector = np.random.permutation(self.nF) if self.augment else np.arange(self.nF)
+    #     return self
 
-    def __next__(self):
-        self.count += 1
-        if self.count == self.nB:
-            raise StopIteration
+    def __getitem__(self, index):
+        assert index <= len(self), 'index range error'
+        # self.count += 1
+        # if self.count == self.nB:
+        #     raise StopIteration
 
-        ia = self.count * self.batch_size
-        ib = min((self.count + 1) * self.batch_size, self.nF)
+        # ia = self.count * self.batch_size
+        # ib = min((self.count + 1) * self.batch_size, self.nF)
 
         if self.multi_scale:
             # Multi-Scale YOLO Training
@@ -129,100 +129,99 @@ class LoadImagesAndLabels:  # for training
             height = self.height
 
         img_all, labels_all, img_paths, img_shapes = [], [], [], []
-        for index, files_index in enumerate(range(ia, ib)):
-            img_path = self.img_files[self.shuffled_vector[files_index]]
-            label_path = self.label_files[self.shuffled_vector[files_index]]
+        img_path = self.img_files[index]
+        label_path = self.label_files[index]
 
-            img = cv2.imread(img_path)  # BGR
-            assert img is not None, 'File Not Found ' + img_path
+        img = cv2.imread(img_path)  # BGR
+        assert img is not None, 'File Not Found ' + img_path
+        labels = self._load_label(label_path)
+        h, w = img.shape[:2]
 
-            augment_hsv = True
-            if self.augment and augment_hsv:
-                # SV augmentation by 50%
-                fraction = 0.50
-                img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-                S = img_hsv[:, :, 1].astype(np.float32)
-                V = img_hsv[:, :, 2].astype(np.float32)
+        augment_hsv = True
+        if self.augment and augment_hsv:
+            # SV augmentation by 50%
+            fraction = 0.50
+            img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+            S = img_hsv[:, :, 1].astype(np.float32)
+            V = img_hsv[:, :, 2].astype(np.float32)
 
-                a = (random.random() * 2 - 1) * fraction + 1
-                S *= a
-                if a > 1:
-                    np.clip(S, a_min=0, a_max=255, out=S)
+            a = (random.random() * 2 - 1) * fraction + 1
+            S *= a
+            if a > 1:
+                np.clip(S, a_min=0, a_max=255, out=S)
 
-                a = (random.random() * 2 - 1) * fraction + 1
-                V *= a
-                if a > 1:
-                    np.clip(V, a_min=0, a_max=255, out=V)
+            a = (random.random() * 2 - 1) * fraction + 1
+            V *= a
+            if a > 1:
+                np.clip(V, a_min=0, a_max=255, out=V)
 
-                img_hsv[:, :, 1] = S.astype(np.uint8)
-                img_hsv[:, :, 2] = V.astype(np.uint8)
-                cv2.cvtColor(img_hsv, cv2.COLOR_HSV2BGR, dst=img)
+            img_hsv[:, :, 1] = S.astype(np.uint8)
+            img_hsv[:, :, 2] = V.astype(np.uint8)
+            cv2.cvtColor(img_hsv, cv2.COLOR_HSV2BGR, dst=img)
 
-            h, w, _ = img.shape
-            img, ratio, padw, padh = letterbox(img, height=height)
+        img, labels = letterbox(img, labels, height=height)
 
-            # Load labels
-            if os.path.isfile(label_path):
-                labels0 = np.loadtxt(label_path, dtype=np.float32).reshape(-1, 5)
+        # Augment image and labels
+        if self.augment:
+            img, labels, M = random_affine(img, labels, degrees=(-5, 5), translate=(0.10, 0.10), scale=(0.90, 1.10))
 
-                # Normalized xywh to pixel xyxy format
-                labels = labels0.copy()
-                labels[:, 1] = ratio * w * (labels0[:, 1] - labels0[:, 3] / 2) + padw
-                labels[:, 2] = ratio * h * (labels0[:, 2] - labels0[:, 4] / 2) + padh
-                labels[:, 3] = ratio * w * (labels0[:, 1] + labels0[:, 3] / 2) + padw
-                labels[:, 4] = ratio * h * (labels0[:, 2] + labels0[:, 4] / 2) + padh
-            else:
-                labels = np.array([])
+        plotFlag = False
+        if plotFlag:
+            import matplotlib.pyplot as plt
+            plt.figure(figsize=(10, 10)) if index == 0 else None
+            plt.subplot(1, 1, index + 1).imshow(img[:, :, ::-1])
+            plt.plot(labels[:, [1, 3, 3, 1, 1]].T, labels[:, [2, 2, 4, 4, 2]].T, '-')
 
-            # Augment image and labels
-            if self.augment:
-                img, labels, M = random_affine(img, labels, degrees=(-5, 5), translate=(0.10, 0.10), scale=(0.90, 1.10))
+        nL = len(labels)
+        if nL > 0:
+            # convert xyxy to xywh
+            labels[:, 1:5] = xyxy2xywh(labels[:, 1:5].copy()) / height
 
-            plotFlag = False
-            if plotFlag:
-                import matplotlib.pyplot as plt
-                plt.figure(figsize=(10, 10)) if index == 0 else None
-                plt.subplot(4, 4, index + 1).imshow(img[:, :, ::-1])
-                plt.plot(labels[:, [1, 3, 3, 1, 1]].T, labels[:, [2, 2, 4, 4, 2]].T, '.-')
-                plt.axis('off')
+        if self.augment:
+            # random left-right flip
+            lr_flip = True
+            if lr_flip & (random.random() > 0.5):
+                img = np.fliplr(img).copy()
+                if nL > 0:
+                    labels[:, 1] = 1 - labels[:, 1]
 
-            nL = len(labels)
-            if nL > 0:
-                # convert xyxy to xywh
-                labels[:, 1:5] = xyxy2xywh(labels[:, 1:5].copy()) / height
-
-            if self.augment:
-                # random left-right flip
-                lr_flip = True
-                if lr_flip & (random.random() > 0.5):
-                    img = np.fliplr(img)
-                    if nL > 0:
-                        labels[:, 1] = 1 - labels[:, 1]
-
-                # random up-down flip
-                ud_flip = False
-                if ud_flip & (random.random() > 0.5):
-                    img = np.flipud(img)
-                    if nL > 0:
-                        labels[:, 2] = 1 - labels[:, 2]
-
-            img_all.append(img)
-            labels_all.append(torch.from_numpy(labels))
-            img_paths.append(img_path)
-            img_shapes.append((h, w))
+            # random up-down flip
+            ud_flip = False
+            if ud_flip & (random.random() > 0.5):
+                img = np.flipud(img).copy()
+                if nL > 0:
+                    labels[:, 2] = 1 - labels[:, 2]
 
         # Normalize
-        img_all = np.stack(img_all)[:, :, :, ::-1].transpose(0, 3, 1, 2)  # BGR to RGB and cv2 to pytorch
-        img_all = np.ascontiguousarray(img_all, dtype=np.float32)
-        img_all /= 255.0
+        img = img.transpose(2, 0, 1).copy()  # BGR to RGB and cv2 to pytorch
+        img = np.ascontiguousarray(img, dtype=np.float32)
+        img /= 255.0
+        
+        labels = np.vstack((labels, np.zeros((100-nL, 5), dtype=np.float32)))
+        return (img, labels, nL)
 
-        return torch.from_numpy(img_all), labels_all, img_paths, img_shapes
+    def _load_label(self, label_path):
+        if os.path.isfile(label_path):
+            labels0 = np.loadtxt(label_path, dtype=np.float32).reshape(-1, 5)
+
+            # Normalized xywh to pixel xyxy format
+            labels = labels0.copy()
+            labels[:, 1] = labels0[:, 1] - labels0[:, 3] / 2
+            labels[:, 2] = labels0[:, 2] - labels0[:, 4] / 2
+            labels[:, 3] = labels0[:, 1] + labels0[:, 3] / 2
+            labels[:, 4] = labels0[:, 2] + labels0[:, 4] / 2
+        else:
+            labels = np.array([])
+        return labels
 
     def __len__(self):
-        return self.nB  # number of batches
+        return self.nF  # number of batches
 
 
-def letterbox(img, height=416, color=(127.5, 127.5, 127.5)):  # resize a rectangular image to a padded square
+def letterbox(img, labels, height=416, color=(127.5, 127.5, 127.5)):
+    """
+    resize a rectangular image to a padded square
+    """
     shape = img.shape[:2]  # shape = [height, width]
     ratio = float(height) / max(shape)  # ratio  = old / new
     new_shape = (round(shape[1] * ratio), round(shape[0] * ratio))
@@ -232,7 +231,14 @@ def letterbox(img, height=416, color=(127.5, 127.5, 127.5)):  # resize a rectang
     left, right = round(dw - 0.1), round(dw + 0.1)
     img = cv2.resize(img, new_shape, interpolation=cv2.INTER_AREA)  # resized, no border
     img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # padded square
-    return img, ratio, dw, dh
+    
+    if len(labels) > 0:
+        labels[:, 1] = ratio * labels[:, 1] + dw
+        labels[:, 2] = ratio * labels[:, 2] + dh
+        labels[:, 3] = ratio * labels[:, 3] + dw
+        labels[:, 4] = ratio * labels[:, 4] + dh
+
+    return img, labels
 
 
 def random_affine(img, targets=None, degrees=(-10, 10), translate=(.1, .1), scale=(.9, 1.1), shear=(-2, 2),
