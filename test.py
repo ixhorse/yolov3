@@ -5,12 +5,12 @@ from pathlib import Path
 
 from models import *
 from utils.datasets import *
+from utils.dataset_voc import VOCDetection
 from utils.utils import *
-
+import pdb
 
 def test(
         cfg,
-        data_cfg,
         weights,
         batch_size=16,
         img_size=416,
@@ -20,11 +20,6 @@ def test(
         save_json=False
 ):
     device = torch_utils.select_device()
-
-    # Configure run
-    data_cfg_dict = parse_data_cfg(data_cfg)
-    nC = int(data_cfg_dict['classes'])  # number of classes (80 for COCO)
-    test_path = data_cfg_dict['valid']
 
     # Initialize model
     model = Darknet(cfg, img_size)
@@ -38,8 +33,12 @@ def test(
     model.to(device).eval()
 
     # Get dataloader
-    # dataloader = torch.utils.data.DataLoader(LoadImagesAndLabels(test_path), batch_size=batch_size)
-    dataloader = LoadImagesAndLabels(test_path, batch_size=batch_size, img_size=img_size)
+    vocset = VOCDetection(root=os.path.join('~', 'data', 'VOCdevkit'), splits=((2007, 'test'),),
+                        batch_size=batch_size, img_size=img_size)
+    dataloader = torch.utils.data.DataLoader(vocset, batch_size=batch_size, num_workers=16)
+
+    nC = vocset.num_class #num class
+    classes = vocset.classes
 
     mean_mAP, mean_R, mean_P, seen = 0.0, 0.0, 0.0, 0
     print('%11s' * 5 % ('Image', 'Total', 'P', 'R', 'mAP'))
@@ -47,8 +46,11 @@ def test(
         [], [], [], [], [], [], [], [], []
     AP_accum, AP_accum_count = np.zeros(nC), np.zeros(nC)
     coco91class = coco80_to_coco91_class()
-    for batch_i, (imgs, targets, paths, shapes) in enumerate(dataloader):
+
+    for batch_i, (imgs, targets, numboxes, shapes) in enumerate(dataloader):
         t = time.time()
+
+        targets = [targets[i, :nL, :].float() for i,nL in enumerate(numboxes)]
         output = model(imgs.to(device))
         output = non_max_suppression(output, conf_thres=conf_thres, nms_thres=nms_thres)
 
@@ -96,7 +98,6 @@ def test(
 
                 detected = []
                 for *pred_bbox, conf, obj_conf, obj_pred in detections:
-
                     pred_bbox = torch.FloatTensor(pred_bbox).view(1, -1)
                     # Compute iou with target boxes
                     iou = bbox_iou(pred_bbox, target_boxes)
@@ -131,32 +132,13 @@ def test(
 
         # Print image mAP and running mean mAP
         print(('%11s%11s' + '%11.3g' * 4 + 's') %
-              (seen, dataloader.nF, mean_P, mean_R, mean_mAP, time.time() - t))
+              (seen, vocset.nF, mean_P, mean_R, mean_mAP, time.time() - t))
 
     # Print mAP per class
     print('%11s' * 5 % ('Image', 'Total', 'P', 'R', 'mAP') + '\n\nmAP Per Class:')
 
-    for i, c in enumerate(load_classes(data_cfg_dict['names'])):
+    for i, c in enumerate(classes):
         print('%15s: %-.4f' % (c, AP_accum[i] / (AP_accum_count[i] + 1E-16)))
-
-    # Save JSON
-    if save_json:
-        imgIds = [int(Path(x).stem.split('_')[-1]) for x in dataloader.img_files]
-        with open('results.json', 'w') as file:
-            json.dump(jdict, file)
-
-        from pycocotools.coco import COCO
-        from pycocotools.cocoeval import COCOeval
-
-        # https://github.com/cocodataset/cocoapi/blob/master/PythonAPI/pycocoEvalDemo.ipynb
-        cocoGt = COCO('../coco/annotations/instances_val2014.json')  # initialize COCO ground truth api
-        cocoDt = cocoGt.loadRes('results.json')  # initialize COCO detections api
-
-        cocoEval = COCOeval(cocoGt, cocoDt, 'bbox')
-        cocoEval.params.imgIds = imgIds  # [:32]  # only evaluate these images
-        cocoEval.evaluate()
-        cocoEval.accumulate()
-        cocoEval.summarize()
 
     # Return mAP
     return mean_mAP, mean_R, mean_P
@@ -166,7 +148,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog='test.py')
     parser.add_argument('--batch-size', type=int, default=32, help='size of each image batch')
     parser.add_argument('--cfg', type=str, default='cfg/yolov3.cfg', help='cfg file path')
-    parser.add_argument('--data-cfg', type=str, default='cfg/coco.data', help='coco.data file path')
     parser.add_argument('--weights', type=str, default='weights/yolov3.weights', help='path to weights file')
     parser.add_argument('--iou-thres', type=float, default=0.5, help='iou threshold required to qualify as detected')
     parser.add_argument('--conf-thres', type=float, default=0.3, help='object confidence threshold')
@@ -179,7 +160,6 @@ if __name__ == '__main__':
     with torch.no_grad():
         mAP = test(
             opt.cfg,
-            opt.data_cfg,
             opt.weights,
             opt.batch_size,
             opt.img_size,

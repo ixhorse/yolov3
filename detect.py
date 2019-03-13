@@ -7,7 +7,7 @@ from sys import platform
 from models import *
 from utils.datasets import *
 from utils.utils import *
-
+from utils.dataset_voc import VOCDetection
 
 def detect(
         cfg,
@@ -48,7 +48,8 @@ def detect(
         dataloader = LoadImages(images, img_size=img_size)
 
     # Get classes and colors
-    classes = load_classes(parse_data_cfg('cfg/coco.data')['names'])
+    classes = VOCDetection.CLASSES
+    print(classes)
     colors = [[random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)] for _ in range(len(classes))]
 
     for i, (path, img, im0) in enumerate(dataloader):

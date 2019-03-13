@@ -10,7 +10,6 @@ import pdb
 
 def train(
         cfg,
-        data_cfg,
         img_size=416,
         resume=False,
         epochs=100,
@@ -20,9 +19,6 @@ def train(
         freeze_backbone=False,
         var=0,
 ):
-    weights = 'weights' + os.sep
-    latest = weights + 'latest.pt'
-    best = weights + 'best.pt'
     device = torch_utils.select_device()
 
     if multi_scale:  # pass maximum multi_scale size
@@ -37,18 +33,16 @@ def train(
     train_dataset = VOCDetection(root=os.path.join('~', 'data', 'VOCdevkit'), 
         batch_size=batch_size, img_size=img_size, multi_scale=multi_scale, augment=True)
     dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size,
-        num_workers=4, pin_memory=True, shuffle=True, drop_last=True)
+        num_workers=6, pin_memory=False, shuffle=True, drop_last=True)
 
     lr0 = 0.001
     cutoff = -1  # backbone reaches to cutoff layer
     start_epoch = 0
     best_loss = float('inf')
     if resume:
-        checkpoint = torch.load(latest, map_location='cpu')
+        checkpoint = torch.load(resume, map_location='cpu')
         model.load_state_dict(checkpoint['model'])
 
-        # if torch.cuda.device_count() > 1:
-        #   model = nn.DataParallel(model)
         model.to(device).train()
 
         # Transfer learning (train only YOLO layers)
@@ -66,14 +60,12 @@ def train(
     else:
         # Initialize model with backbone (optional)
         if cfg.endswith('yolov3.cfg'):
-            load_darknet_weights(model, weights + 'darknet53.conv.74')
+            load_darknet_weights(model, 'weights/darknet53.conv.74')
             cutoff = 75
         elif cfg.endswith('yolov3-tiny.cfg'):
-            load_darknet_weights(model, weights + 'yolov3-tiny.conv.15')
+            load_darknet_weights(model, 'weights/yolov3-tiny.conv.15')
             cutoff = 15
 
-        # if torch.cuda.device_count() > 1:
-        #    model = nn.DataParallel(model)
         model.to(device).train()
         optimizer = torch.optim.SGD(filter(lambda x: x.requires_grad, model.parameters()), lr=lr0, momentum=.9)
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[54, 61], gamma=0.1)
@@ -84,9 +76,7 @@ def train(
     n_burnin = min(round(train_dataset.nB / 5 + 1), 1000)  # number of burn-in batches
     for epoch in range(epochs):
         epoch += start_epoch
-        print(('%8s%12s' + '%10s' * 7) % (
-            'Epoch', 'Batch', 'xy', 'wh', 'conf', 'cls', 'total', 'nTargets', 'time'))
-        
+        print(('%8s%12s' + '%10s' * 7) % ('Epoch', 'Batch', 'xy', 'wh', 'conf', 'cls', 'total', 'nTargets', 'time'))      
         scheduler.step()
 
         # Freeze darknet53.conv.74 for first epoch
@@ -98,18 +88,12 @@ def train(
         ui = -1
         rloss = defaultdict(float)  # running loss
         
-        for i, (imgs, targets, numboxes) in enumerate(dataloader):
+        for i, (imgs, targets, numboxes, _) in enumerate(dataloader):
             if sum(numboxes) < 1:  # if no targets continue
                 continue
             imgs = imgs.float().to(device)
-            targets = [targets[i, :nL, :].float() for i,nL in enumerate(numboxes)]
-            
+            targets = [targets[i, :nL, :].float() for i,nL in enumerate(numboxes)]       
             optimizer.zero_grad()
-            # SGD burn-in
-            # if (epoch == 0) & (i <= n_burnin):
-            #     lr = lr0 * (i / n_burnin) ** 4
-            #     for g in optimizer.param_groups:
-            #         g['lr'] = lr
 
             # Compute loss
             loss = model(imgs, targets, var=var)
@@ -120,13 +104,9 @@ def train(
             ui += 1
             for key, val in model.losses.items():
                 rloss[key] = (rloss[key] * ui + val) / (ui + 1)
-            if(i % 10 == 0):
-                print(('%8s%12s' + '%10.3g' * 7) % (
-                    '%g/%g' % (epoch, epochs - 1),
-                    '%g/%g' % (i, len(dataloader) - 1),
-                    rloss['xy'], rloss['wh'], rloss['conf'],
-                    rloss['cls'], rloss['loss'],
-                    model.losses['nT'], time.time() - t0))
+            if(i % 20 == 0):
+                print(('%8s%12s' + '%10.3g' * 7) % ('%g/%g' % (epoch, epochs - 1), '%g/%g' % (i, len(dataloader) - 1),
+                    rloss['xy'], rloss['wh'], rloss['conf'], rloss['cls'], rloss['loss'], model.losses['nT'], time.time() - t0))
             t0 = time.time()
 
         # Update best loss
@@ -139,11 +119,12 @@ def train(
                       'best_loss': best_loss,
                       'model': model.state_dict(),
                       'optimizer': optimizer.state_dict()}
-        torch.save(checkpoint, latest)
+        if(epoch % 5 == 0):
+            torch.save(checkpoint, 'weights/epoch_%03d.pt' % epoch)
 
         # Save best checkpoint
         if best_loss == loss_per_target:
-            os.system('cp ' + latest + ' ' + best)
+            torch.save(checkpoint, 'weights/best.pt')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -151,10 +132,9 @@ if __name__ == '__main__':
     parser.add_argument('--batch-size', type=int, default=16, help='size of each image batch')
     parser.add_argument('--accumulated-batches', type=int, default=1, help='number of batches before optimizer step')
     parser.add_argument('--cfg', type=str, default='cfg/yolov3.cfg', help='cfg file path')
-    parser.add_argument('--data-cfg', type=str, default='cfg/coco.data', help='coco.data file path')
     parser.add_argument('--multi-scale', action='store_true', help='random image sizes per batch 320 - 608')
     parser.add_argument('--img-size', type=int, default=32 * 13, help='pixels')
-    parser.add_argument('--resume', action='store_true', help='resume training flag')
+    parser.add_argument('--resume', type=str, default=None, help='resume training flag')
     parser.add_argument('--var', type=float, default=0, help='test variable')
     opt = parser.parse_args()
     print(opt, end='\n\n')
@@ -163,7 +143,6 @@ if __name__ == '__main__':
 
     train(
         opt.cfg,
-        opt.data_cfg,
         img_size=opt.img_size,
         resume=opt.resume,
         epochs=opt.epochs,

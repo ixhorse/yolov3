@@ -37,7 +37,7 @@ class VOCDetection(LoadImagesAndLabels):
     @property
     def classes(self):
         """Category names."""
-        return type(self).CLASSES
+        return self.CLASSES
 
     @property
     def num_class(self):

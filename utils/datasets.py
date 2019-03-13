@@ -41,7 +41,7 @@ class LoadImages():  # for inference
         assert img0 is not None, 'File Not Found ' + img_path
 
         # Padded resize
-        img, _, _, _ = letterbox(img0, height=self.height)
+        img, _, = letterbox(img0, None, height=self.height)
 
         # Normalize RGB
         img = img[:, :, ::-1].transpose(2, 0, 1)
@@ -107,19 +107,8 @@ class LoadImagesAndLabels(Dataset):  # for training
 
         assert self.nF > 0, 'No images found in %s' % path
 
-    # def __iter__(self):
-    #     self.count = -1
-    #     self.shuffled_vector = np.random.permutation(self.nF) if self.augment else np.arange(self.nF)
-    #     return self
-
     def __getitem__(self, index):
         assert index <= len(self), 'index range error'
-        # self.count += 1
-        # if self.count == self.nB:
-        #     raise StopIteration
-
-        # ia = self.count * self.batch_size
-        # ib = min((self.count + 1) * self.batch_size, self.nF)
 
         if self.multi_scale:
             # Multi-Scale YOLO Training
@@ -131,12 +120,14 @@ class LoadImagesAndLabels(Dataset):  # for training
         img_all, labels_all, img_paths, img_shapes = [], [], [], []
         img_path = self.img_files[index]
         label_path = self.label_files[index]
-
+        
+        # read img and label
         img = cv2.imread(img_path)  # BGR
         assert img is not None, 'File Not Found ' + img_path
         labels = self._load_label(label_path)
         h, w = img.shape[:2]
 
+        # augment
         augment_hsv = True
         if self.augment and augment_hsv:
             # SV augmentation by 50%
@@ -198,7 +189,7 @@ class LoadImagesAndLabels(Dataset):  # for training
         img /= 255.0
         
         labels = np.vstack((labels, np.zeros((100-nL, 5), dtype=np.float32)))
-        return (img, labels, nL)
+        return (img, labels, nL, (h,w))
 
     def _load_label(self, label_path):
         if os.path.isfile(label_path):
@@ -232,7 +223,7 @@ def letterbox(img, labels, height=416, color=(127.5, 127.5, 127.5)):
     img = cv2.resize(img, new_shape, interpolation=cv2.INTER_AREA)  # resized, no border
     img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # padded square
     
-    if len(labels) > 0:
+    if labels is not None and len(labels) > 0:
         labels[:, 1] = ratio * labels[:, 1] + dw
         labels[:, 2] = ratio * labels[:, 2] + dh
         labels[:, 3] = ratio * labels[:, 3] + dw
