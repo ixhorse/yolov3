@@ -41,7 +41,7 @@ class LoadImages():  # for inference
         assert img0 is not None, 'File Not Found ' + img_path
 
         # Padded resize
-        img, _, = letterbox(img0, None, height=self.height)
+        img, _, = letterbox(img0, None, height=self.height, mode='test')
 
         # Normalize RGB
         img = img[:, :, ::-1].transpose(2, 0, 1)
@@ -77,7 +77,7 @@ class LoadWebcam:  # for inference
         img0 = cv2.flip(img0, 1)
 
         # Padded resize
-        img, _, _, _ = letterbox(img0, height=self.height)
+        img, _, _, _ = letterbox(img0, height=self.height, mode='test')
 
         # Normalize RGB
         img = img[:, :, ::-1].transpose(2, 0, 1)
@@ -91,8 +91,8 @@ class LoadWebcam:  # for inference
 
 
 class LoadImagesAndLabels(Dataset):  # for training
-    def __init__(self, img_files, label_files=None, batch_size=1, 
-                 img_size=608, multi_scale=False, augment=False):
+    def __init__(self, img_files, label_files=None, batch_size=1,
+                 img_size=608, multi_scale=False, mode='train'):
         self.img_files = img_files
         self.label_files = label_files if label_files else \
                             [x.replace('images', 'labels').replace('.png', '.txt').replace('.jpg', '.txt')
@@ -103,7 +103,7 @@ class LoadImagesAndLabels(Dataset):  # for training
         self.batch_size = batch_size
         self.height = img_size
         self.multi_scale = multi_scale
-        self.augment = augment
+        self.mode = mode
 
         assert self.nF > 0, 'No images found in %s' % path
 
@@ -117,77 +117,38 @@ class LoadImagesAndLabels(Dataset):  # for training
             # Fixed-Scale YOLO Training
             height = self.height
 
-        img_all, labels_all, img_paths, img_shapes = [], [], [], []
-        img_path = self.img_files[index]
-        label_path = self.label_files[index]
-        
         # read img and label
-        img = cv2.imread(img_path)  # BGR
-        assert img is not None, 'File Not Found ' + img_path
-        labels = self._load_label(label_path)
+        img = cv2.imread(self.img_files[index])  # BGR
+        assert img is not None, 'File Not Found ' + self.img_files[index]
         h, w = img.shape[:2]
 
-        # augment
-        augment_hsv = True
-        if self.augment and augment_hsv:
-            # SV augmentation by 50%
-            fraction = 0.50
-            img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-            S = img_hsv[:, :, 1].astype(np.float32)
-            V = img_hsv[:, :, 2].astype(np.float32)
+        labels = self._load_label(self.label_files[index])
 
-            a = (random.random() * 2 - 1) * fraction + 1
-            S *= a
-            if a > 1:
-                np.clip(S, a_min=0, a_max=255, out=S)
+        if self.mode == 'train':
+            # hsv
+            img = augment_hsv(img, fraction=0.5)
+            # pad and resize
+            img, labels = letterbox(img, labels, height=height, mode=self.mode)
+            # Augment image and labels
+            img, labels, M = random_affine(img, labels, translate=(0.10, 0.10), scale=(0.90, 1.10))
+            # random left-right flip
+            img, labels = random_flip(img, labels, 0.5)
+            # color distort
+            # img = random_color_distort(img)
+        else:
+            # pad and resize
+            img, labels = letterbox(img, labels, height=height, mode=self.mode)
 
-            a = (random.random() * 2 - 1) * fraction + 1
-            V *= a
-            if a > 1:
-                np.clip(V, a_min=0, a_max=255, out=V)
-
-            img_hsv[:, :, 1] = S.astype(np.uint8)
-            img_hsv[:, :, 2] = V.astype(np.uint8)
-            cv2.cvtColor(img_hsv, cv2.COLOR_HSV2BGR, dst=img)
-
-        img, labels = letterbox(img, labels, height=height)
-
-        # Augment image and labels
-        if self.augment:
-            img, labels, M = random_affine(img, labels, degrees=(-5, 5), translate=(0.10, 0.10), scale=(0.90, 1.10))
-
-        plotFlag = False
-        if plotFlag:
-            import matplotlib.pyplot as plt
-            plt.figure(figsize=(10, 10)) if index == 0 else None
-            plt.subplot(1, 1, index + 1).imshow(img[:, :, ::-1])
-            plt.plot(labels[:, [1, 3, 3, 1, 1]].T, labels[:, [2, 2, 4, 4, 2]].T, '-')
+        # show_image(img, labels)
 
         nL = len(labels)
         if nL > 0:
             # convert xyxy to xywh
             labels[:, 1:5] = xyxy2xywh(labels[:, 1:5].copy()) / height
 
-        if self.augment:
-            # random left-right flip
-            lr_flip = True
-            if lr_flip & (random.random() > 0.5):
-                img = np.fliplr(img).copy()
-                if nL > 0:
-                    labels[:, 1] = 1 - labels[:, 1]
-
-            # random up-down flip
-            ud_flip = False
-            if ud_flip & (random.random() > 0.5):
-                img = np.flipud(img).copy()
-                if nL > 0:
-                    labels[:, 2] = 1 - labels[:, 2]
-
         # Normalize
-        img = img.transpose(2, 0, 1).copy()  # BGR to RGB and cv2 to pytorch
-        img = np.ascontiguousarray(img, dtype=np.float32)
-        img /= 255.0
-        
+        img = img.transpose(2, 0, 1)  # BGR to RGB
+        img = normalize(img)
         labels = np.vstack((labels, np.zeros((100-nL, 5), dtype=np.float32)))
         return (img, labels, nL, (h,w))
 
@@ -208,26 +169,52 @@ class LoadImagesAndLabels(Dataset):  # for training
     def __len__(self):
         return self.nF  # number of batches
 
+def augment_hsv(img, fraction):
+    fraction = 0.50
+    img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    S = img_hsv[:, :, 1].astype(np.float32)
+    V = img_hsv[:, :, 2].astype(np.float32)
 
-def letterbox(img, labels, height=416, color=(127.5, 127.5, 127.5)):
+    a = (random.random() * 2 - 1) * fraction + 1
+    S *= a
+    if a > 1:
+        np.clip(S, a_min=0, a_max=255, out=S)
+
+    a = (random.random() * 2 - 1) * fraction + 1
+    V *= a
+    if a > 1:
+        np.clip(V, a_min=0, a_max=255, out=V)
+
+    img_hsv[:, :, 1] = S.astype(np.uint8)
+    img_hsv[:, :, 2] = V.astype(np.uint8)
+    cv2.cvtColor(img_hsv, cv2.COLOR_HSV2BGR, dst=img)
+    return img
+
+
+def letterbox(img, labels, height=416, mode='train', color=(127.5, 127.5, 127.5)):
     """
     resize a rectangular image to a padded square
     """
     shape = img.shape[:2]  # shape = [height, width]
     ratio = float(height) / max(shape)  # ratio  = old / new
-    new_shape = (round(shape[1] * ratio), round(shape[0] * ratio))
-    dw = (height - new_shape[0]) / 2  # width padding
-    dh = (height - new_shape[1]) / 2  # height padding
-    top, bottom = round(dh - 0.1), round(dh + 0.1)
-    left, right = round(dw - 0.1), round(dw + 0.1)
-    img = cv2.resize(img, new_shape, interpolation=cv2.INTER_AREA)  # resized, no border
+    if mode == 'test':
+        dw = (max(shape) - shape[1]) / 2  # width padding
+        dh = (max(shape) - shape[0]) / 2  # height padding
+        top, bottom = round(dh - 0.1), round(dh + 0.1)
+        left, right = round(dw - 0.1), round(dw + 0.1)
+    else:
+        dw = random.randint(0, max(shape) - shape[1])
+        dh = random.randint(0, max(shape) - shape[0])
+        left, right = round(dw - 0.1), round(max(shape) - shape[1] - dw + 0.1)
+        top, bottom = round(dh - 0.1), round(max(shape) - shape[0] - dh + 0.1)
     img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # padded square
-    
+    interp = np.random.randint(0, 5)
+    img = cv2.resize(img, (height, height), interpolation=interp)  # resized, no border
     if labels is not None and len(labels) > 0:
-        labels[:, 1] = ratio * labels[:, 1] + dw
-        labels[:, 2] = ratio * labels[:, 2] + dh
-        labels[:, 3] = ratio * labels[:, 3] + dw
-        labels[:, 4] = ratio * labels[:, 4] + dh
+        labels[:, 1] = ratio * (labels[:, 1] + left)
+        labels[:, 2] = ratio * (labels[:, 2] + top)
+        labels[:, 3] = ratio * (labels[:, 3] + left)
+        labels[:, 4] = ratio * (labels[:, 4] + top)
 
     return img, labels
 
@@ -302,6 +289,30 @@ def random_affine(img, targets=None, degrees=(-10, 10), translate=(.1, .1), scal
     else:
         return imw
 
+def random_flip(img, labels, px=0.5):
+    """
+    random horizontal flip
+    """
+    height = img.shape[0] - 1
+    if(random.random() > 0.5):
+        img = np.fliplr(img).copy()
+        if(len(labels) > 0):
+            labels[:, 1] = height - labels[:, 1]
+            labels[:, 3] = height - labels[:, 3]
+            labels[:, [1, 3]] = labels[:, [3, 1]]
+    return img, labels
+
+
+def normalize(img, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
+    """
+    norm = (x - mean) / std
+    """
+    img = img / 255.0
+    mean = np.array(mean)
+    std = np.array(std)
+    img = (img - mean[:, np.newaxis, np.newaxis]) / std[:, np.newaxis, np.newaxis]
+    return img.astype(np.float32)
+
 
 def convert_tif2bmp(p='../xview/val_images_bmp'):
     import glob
@@ -311,3 +322,101 @@ def convert_tif2bmp(p='../xview/val_images_bmp'):
         print('%g/%g' % (i + 1, len(files)))
         cv2.imwrite(f.replace('.tif', '.bmp'), cv2.imread(f))
         os.system('rm -rf ' + f)
+
+def show_image(img, labels):
+    import matplotlib.pyplot as plt
+    plt.figure(figsize=(10, 10))
+    plt.subplot(1, 1, 1).imshow(img[:, :, ::-1])
+    plt.plot(labels[:, [1, 3, 3, 1, 1]].T, labels[:, [2, 2, 4, 4, 2]].T, '-')
+    plt.show()
+
+def random_color_distort(src, brightness_delta=32, contrast_low=0.5, contrast_high=1.5,
+                         saturation_low=0.5, saturation_high=1.5, hue_delta=18):
+    """
+    gluoncv/data/transforms/experimental/image.py
+    Randomly distort image color space.
+    Note that input image should in original range [0, 255].
+    Parameters
+    ----------
+    src : numpy.ndarray
+        Input image as HWC format.
+    brightness_delta : int
+        Maximum brightness delta. Defaults to 32.
+    contrast_low : float
+        Lowest contrast. Defaults to 0.5.
+    contrast_high : float
+        Highest contrast. Defaults to 1.5.
+    saturation_low : float
+        Lowest saturation. Defaults to 0.5.
+    saturation_high : float
+        Highest saturation. Defaults to 1.5.
+    hue_delta : int
+        Maximum hue delta. Defaults to 18.
+    Returns
+    -------
+    numpy.ndarray
+        Distorted image in HWC format.
+    """
+    def brightness(src, delta, p=0.5):
+        """Brightness distortion."""
+        if np.random.uniform(0, 1) > p:
+            delta = np.random.uniform(-delta, delta)
+            src += delta
+            return src
+        return src
+
+    def contrast(src, low, high, p=0.5):
+        """Contrast distortion"""
+        if np.random.uniform(0, 1) > p:
+            alpha = np.random.uniform(low, high)
+            src *= alpha
+            return src
+        return src
+
+    def saturation(src, low, high, p=0.5):
+        """Saturation distortion."""
+        if np.random.uniform(0, 1) > p:
+            alpha = np.random.uniform(low, high)
+            gray = src * np.array([[[0.299, 0.587, 0.114]]])
+            gray = np.sum(gray, axis=2, keepdims=True)
+            gray *= (1.0 - alpha)
+            src *= alpha
+            src += gray
+            return src
+        return src
+
+    def hue(src, delta, p=0.5):
+        """Hue distortion"""
+        if np.random.uniform(0, 1) > p:
+            alpha = random.uniform(-delta, delta)
+            u = np.cos(alpha * np.pi)
+            w = np.sin(alpha * np.pi)
+            bt = np.array([[1.0, 0.0, 0.0],
+                           [0.0, u, -w],
+                           [0.0, w, u]])
+            tyiq = np.array([[0.299, 0.587, 0.114],
+                             [0.596, -0.274, -0.321],
+                             [0.211, -0.523, 0.311]])
+            ityiq = np.array([[1.0, 0.956, 0.621],
+                              [1.0, -0.272, -0.647],
+                              [1.0, -1.107, 1.705]])
+            t = np.dot(np.dot(ityiq, bt), tyiq).T
+            src = np.dot(src, t)
+            return src
+        return src
+
+    src = src.astype(np.float32)
+    # brightness
+    src = brightness(src, brightness_delta)
+
+    # color jitter
+    if np.random.randint(0, 2):
+        src = contrast(src, contrast_low, contrast_high)
+        src = saturation(src, saturation_low, saturation_high)
+        src = hue(src, hue_delta)
+    else:
+        src = saturation(src, saturation_low, saturation_high)
+        src = hue(src, hue_delta)
+        src = contrast(src, contrast_low, contrast_high)
+    # return np.clip(src, 0, 255).astype(np.uint8)
+    return src

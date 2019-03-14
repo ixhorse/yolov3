@@ -34,7 +34,7 @@ def test(
 
     # Get dataloader
     vocset = VOCDetection(root=os.path.join('~', 'data', 'VOCdevkit'), splits=((2007, 'test'),),
-                        batch_size=batch_size, img_size=img_size)
+                        batch_size=batch_size, img_size=img_size, mode='test')
     dataloader = torch.utils.data.DataLoader(vocset, batch_size=batch_size, num_workers=16)
 
     nC = vocset.num_class #num class
@@ -49,7 +49,7 @@ def test(
 
     for batch_i, (imgs, targets, numboxes, shapes) in enumerate(dataloader):
         t = time.time()
-
+        # pdb.set_trace()
         targets = [targets[i, :nL, :].float() for i,nL in enumerate(numboxes)]
         output = model(imgs.to(device))
         output = non_max_suppression(output, conf_thres=conf_thres, nms_thres=nms_thres)
@@ -147,7 +147,7 @@ def test(
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog='test.py')
     parser.add_argument('--batch-size', type=int, default=32, help='size of each image batch')
-    parser.add_argument('--cfg', type=str, default='cfg/yolov3.cfg', help='cfg file path')
+    parser.add_argument('--cfg', type=str, default='cfg/yolov3-voc.cfg', help='cfg file path')
     parser.add_argument('--weights', type=str, default='weights/yolov3.weights', help='path to weights file')
     parser.add_argument('--iou-thres', type=float, default=0.5, help='iou threshold required to qualify as detected')
     parser.add_argument('--conf-thres', type=float, default=0.3, help='object confidence threshold')

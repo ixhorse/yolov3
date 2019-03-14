@@ -20,7 +20,7 @@ class VOCDetection(LoadImagesAndLabels):
 
     def __init__(self, root=os.path.join('~', 'data', 'voc', 'VOCdevkit'),
                 splits=((2007, 'trainval'), (2012, 'trainval')),
-                batch_size=1, img_size=608, multi_scale=False, augment=False):
+                batch_size=1, img_size=608, multi_scale=False, mode='train'):
         self._root = os.path.expanduser(root)
         self._splits = splits
         self._items = self._load_items(splits)
@@ -31,7 +31,7 @@ class VOCDetection(LoadImagesAndLabels):
         self.index_map = dict(zip(self.classes, range(self.num_class)))
 
         super(VOCDetection, self).__init__(self._img_files, self._label_files, batch_size,
-                                            img_size, multi_scale, augment)
+                                            img_size, multi_scale, mode)
 
 
     @property
@@ -85,14 +85,3 @@ class VOCDetection(LoadImagesAndLabels):
         assert 0 <= ymin < height, "ymin must in [0, {}), given {}".format(height, ymin)
         assert xmin < xmax <= width, "xmax must in (xmin, {}], given {}".format(width, xmax)
         assert ymin < ymax <= height, "ymax must in (ymin, {}], given {}".format(height, ymax)
-
-
-if __name__ == '__main__':
-    voc = VOCDetection(root=os.path.join('~', 'data', 'VOCdevkit'))
-    print(len(voc))
-    for imgs, labels, paths, shapes in voc:
-        print(labels)
-        print(paths)
-        print(shapes)
-        plt.show()
-        break
