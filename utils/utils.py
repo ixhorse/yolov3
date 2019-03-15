@@ -83,7 +83,7 @@ def plot_one_box(x, img, color=None, label=None, line_thickness=None):  # Plots 
 def weights_init_normal(m):
     classname = m.__class__.__name__
     if classname.find('Conv') != -1:
-        torch.nn.init.xavier_normal_(m.weight.data)
+        torch.nn.init.normal_(m.weight.data, 0.0, 0.03)
     elif classname.find('BatchNorm2d') != -1:
         torch.nn.init.normal_(m.weight.data, 1.0, 0.03)
         torch.nn.init.constant_(m.bias.data, 0.0)

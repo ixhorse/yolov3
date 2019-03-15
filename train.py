@@ -93,10 +93,10 @@ def train(
                 continue
 
              # SGD burn-in
-            if (epoch == 0) & (i <= n_burnin):
-                lr = lr0 * (i / n_burnin) ** 4
-                for g in optimizer.param_groups:
-                    g['lr'] = lr
+            # if (epoch == 0) & (i <= n_burnin):
+            #     lr = lr0 * (i / n_burnin) ** 4
+            #     for g in optimizer.param_groups:
+            #         g['lr'] = lr
 
             imgs = imgs.float().to(device)
             targets = [targets[i, :nL, :].float() for i,nL in enumerate(numboxes)]

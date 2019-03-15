@@ -46,7 +46,7 @@ class LoadImages():  # for inference
         # Normalize RGB
         img = img[:, :, ::-1].transpose(2, 0, 1)
         img = np.ascontiguousarray(img, dtype=np.float32)
-        img /= 255.0
+        img = normalize(img)
 
         # cv2.imwrite(img_path + '.letterbox.jpg', 255 * img.transpose((1, 2, 0))[:, :, ::-1])  # save letterbox image
         return img_path, img, img0
@@ -82,7 +82,7 @@ class LoadWebcam:  # for inference
         # Normalize RGB
         img = img[:, :, ::-1].transpose(2, 0, 1)
         img = np.ascontiguousarray(img, dtype=np.float32)
-        img /= 255.0
+        img = normalize(img)
 
         return img_path, img, img0
 
@@ -128,9 +128,9 @@ class LoadImagesAndLabels(Dataset):  # for training
             # hsv
             img = augment_hsv(img, fraction=0.5)
             # pad and resize
-            img, labels = letterbox(img, labels, height=height, mode=self.mode)
+            img, labels = letterbox(img, labels, height=height, mode='test')
             # Augment image and labels
-            img, labels, M = random_affine(img, labels, translate=(0.10, 0.10), scale=(0.90, 1.10))
+            img, labels, M = random_affine(img, labels, degrees=(-5, 5), translate=(0.10, 0.10), scale=(0.90, 1.10))
             # random left-right flip
             img, labels = random_flip(img, labels, 0.5)
             # color distort
@@ -147,7 +147,8 @@ class LoadImagesAndLabels(Dataset):  # for training
             labels[:, 1:5] = xyxy2xywh(labels[:, 1:5].copy()) / height
 
         # Normalize
-        img = img.transpose(2, 0, 1)  # BGR to RGB
+        img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB
+        img = np.ascontiguousarray(img, dtype=np.float32)
         img = normalize(img)
         labels = np.vstack((labels, np.zeros((100-nL, 5), dtype=np.float32)))
         return (img, labels, nL, (h,w))
@@ -170,7 +171,6 @@ class LoadImagesAndLabels(Dataset):  # for training
         return self.nF  # number of batches
 
 def augment_hsv(img, fraction):
-    fraction = 0.50
     img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     S = img_hsv[:, :, 1].astype(np.float32)
     V = img_hsv[:, :, 2].astype(np.float32)
@@ -200,13 +200,13 @@ def letterbox(img, labels, height=416, mode='train', color=(127.5, 127.5, 127.5)
     if mode == 'test':
         dw = (max(shape) - shape[1]) / 2  # width padding
         dh = (max(shape) - shape[0]) / 2  # height padding
-        top, bottom = round(dh - 0.1), round(dh + 0.1)
         left, right = round(dw - 0.1), round(dw + 0.1)
+        top, bottom = round(dh - 0.1), round(dh + 0.1)
     else:
         dw = random.randint(0, max(shape) - shape[1])
         dh = random.randint(0, max(shape) - shape[0])
-        left, right = round(dw - 0.1), round(max(shape) - shape[1] - dw + 0.1)
-        top, bottom = round(dh - 0.1), round(max(shape) - shape[0] - dh + 0.1)
+        left, right = dw - 0.1, max(shape) - shape[1] - dw
+        top, bottom = dh - 0.1, max(shape) - shape[0] - dh
     img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # padded square
     interp = np.random.randint(0, 5)
     img = cv2.resize(img, (height, height), interpolation=interp)  # resized, no border
@@ -294,7 +294,7 @@ def random_flip(img, labels, px=0.5):
     random horizontal flip
     """
     height = img.shape[0] - 1
-    if(random.random() > 0.5):
+    if random.random() > 0.5:
         img = np.fliplr(img).copy()
         if(len(labels) > 0):
             labels[:, 1] = height - labels[:, 1]
