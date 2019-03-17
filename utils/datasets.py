@@ -97,18 +97,19 @@ class LoadImagesAndLabels(Dataset):  # for training
         self.label_files = label_files if label_files else \
                             [x.replace('images', 'labels').replace('.png', '.txt').replace('.jpg', '.txt')
                             for x in self.img_files]
-
         self.nF = len(self.img_files)  # number of image files
         self.nB = math.ceil(self.nF / batch_size)  # number of batches
         self.batch_size = batch_size
         self.height = img_size
         self.multi_scale = multi_scale
         self.mode = mode
+        self.shuffled_vector = np.random.permutation(self.nF)
 
         assert self.nF > 0, 'No images found in %s' % path
 
     def __getitem__(self, index):
         assert index <= len(self), 'index range error'
+        index = self.shuffled_vector[index]
 
         if self.multi_scale:
             # Multi-Scale YOLO Training
@@ -123,16 +124,15 @@ class LoadImagesAndLabels(Dataset):  # for training
         h, w = img.shape[:2]
 
         labels = self._load_label(self.label_files[index])
-
         if self.mode == 'train':
             # hsv
             img = augment_hsv(img, fraction=0.5)
             # pad and resize
-            img, labels = letterbox(img, labels, height=height, mode='test')
+            img, labels = letterbox(img, labels.copy(), height=height, mode='test')
             # Augment image and labels
-            img, labels, M = random_affine(img, labels, degrees=(-5, 5), translate=(0.10, 0.10), scale=(0.90, 1.10))
+            img, labels, M = random_affine(img, labels.copy(), degrees=(-5, 5), translate=(0.10, 0.10), scale=(0.90, 1.20))
             # random left-right flip
-            img, labels = random_flip(img, labels, 0.5)
+            img, labels = random_flip(img, labels.copy(), 0.5)
             # color distort
             # img = random_color_distort(img)
         else:
@@ -144,6 +144,7 @@ class LoadImagesAndLabels(Dataset):  # for training
         nL = len(labels)
         if nL > 0:
             # convert xyxy to xywh
+            labels = np.clip(labels, 0, self.height - 1)
             labels[:, 1:5] = xyxy2xywh(labels[:, 1:5].copy()) / height
 
         # Normalize
@@ -293,8 +294,8 @@ def random_flip(img, labels, px=0.5):
     """
     random horizontal flip
     """
-    height = img.shape[0] - 1
-    if random.random() > 0.5:
+    height = img.shape[0]
+    if random.random() < px:
         img = np.fliplr(img).copy()
         if(len(labels) > 0):
             labels[:, 1] = height - labels[:, 1]

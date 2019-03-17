@@ -131,14 +131,14 @@ def test(
             mean_P = np.mean(mP)
 
         # Print image mAP and running mean mAP
-        print(('%11s%11s' + '%11.3g' * 4 + 's') %
-              (seen, vocset.nF, mean_P, mean_R, mean_mAP, time.time() - t))
-
-    # Print mAP per class
-    print('%11s' * 5 % ('Image', 'Total', 'P', 'R', 'mAP') + '\n\nmAP Per Class:')
-
-    for i, c in enumerate(classes):
-        print('%15s: %-.4f' % (c, AP_accum[i] / (AP_accum_count[i] + 1E-16)))
+    #     print(('%11s%11s' + '%11.3g' * 4 + 's') %
+    #           (seen, vocset.nF, mean_P, mean_R, mean_mAP, time.time() - t))
+    #
+    # # Print mAP per class
+    # print('%11s' * 5 % ('Image', 'Total', 'P', 'R', 'mAP') + '\n\nmAP Per Class:')
+    #
+    # for i, c in enumerate(classes):
+    #     print('%15s: %-.4f' % (c, AP_accum[i] / (AP_accum_count[i] + 1E-16)))
 
     # Return mAP
     return mean_mAP, mean_R, mean_P

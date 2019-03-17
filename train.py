@@ -19,6 +19,7 @@ def train(
         freeze_backbone=False,
         var=0,
 ):
+    np.random.seed(666)
     device = torch_utils.select_device()
 
     if multi_scale:  # pass maximum multi_scale size
@@ -50,7 +51,7 @@ def train(
         #     p.requires_grad = True if (p.shape[0] == 255) else False
         optimizer = torch.optim.SGD(filter(lambda x: x.requires_grad, model.parameters()), lr=lr0, momentum=.9)
 
-        start_epoch = checkpoint['epoch'] + 1
+        start_epoch = checkpoint['epoch']
         if checkpoint['optimizer'] is not None:
             optimizer.load_state_dict(checkpoint['optimizer'])
             best_loss = checkpoint['best_loss']
@@ -74,8 +75,7 @@ def train(
     t0 = time.time()
     # model_info(model)
     n_burnin = 1000  # number of burn-in batches
-    for epoch in range(epochs):
-        epoch += start_epoch
+    for epoch in range(start_epoch, epochs):
         print(('%8s%12s' + '%10s' * 7) % ('Epoch', 'Batch', 'xy', 'wh', 'conf', 'cls', 'total', 'nTargets', 'time'))
         scheduler.step()
 
@@ -125,12 +125,13 @@ def train(
                       'best_loss': best_loss,
                       'model': model.state_dict(),
                       'optimizer': optimizer.state_dict()}
-        if(epoch % 5 == 0):
+        if epoch % 5 == 0:
             torch.save(checkpoint, 'weights/epoch_%03d.pt' % epoch)
-
-        # Save best checkpoint
-        if best_loss == rloss['loss']:
-            torch.save(checkpoint, 'weights/best.pt')
+        
+        if epoch > 19 and epoch % 10 == 0:
+            with torch.no_grad():
+                mAP, R, P = test.test(cfg, weights='weights/epoch_%03d.pt'%epoch, batch_size=32, img_size=img_size)
+                print(mAP, R, P)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
