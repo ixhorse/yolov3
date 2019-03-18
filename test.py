@@ -17,18 +17,20 @@ def test(
         iou_thres=0.5,
         conf_thres=0.3,
         nms_thres=0.45,
-        save_json=False
+        save_json=False,
+        model=None
 ):
     device = torch_utils.select_device()
 
-    # Initialize model
-    model = Darknet(cfg, img_size)
+    if model is None:
+        # Initialize model
+        model = Darknet(cfg, img_size)
 
-    # Load weights
-    if weights.endswith('.pt'):  # pytorch format
-        model.load_state_dict(torch.load(weights, map_location='cpu')['model'])
-    else:  # darknet format
-        load_darknet_weights(model, weights)
+        # Load weights
+        if weights.endswith('.pt'):  # pytorch format
+            model.load_state_dict(torch.load(weights, map_location='cpu')['model'])
+        else:  # darknet format
+            load_darknet_weights(model, weights)
 
     model.to(device).eval()
 
@@ -42,12 +44,11 @@ def test(
 
     mean_mAP, mean_R, mean_P, seen = 0.0, 0.0, 0.0, 0
     print('%11s' * 5 % ('Image', 'Total', 'P', 'R', 'mAP'))
-    outputs, mAPs, mR, mP, TP, confidence, pred_class, target_class, jdict = \
-        [], [], [], [], [], [], [], [], []
+    mP, mR, mAPs, TP, jdict = [], [], [], [], []
     AP_accum, AP_accum_count = np.zeros(nC), np.zeros(nC)
     coco91class = coco80_to_coco91_class()
-
     for batch_i, (imgs, targets, numboxes, shapes) in enumerate(dataloader):
+        targets = targets.to(device)
         t = time.time()
         # pdb.set_trace()
         targets = [targets[i, :nL, :].float() for i,nL in enumerate(numboxes)]
@@ -55,22 +56,22 @@ def test(
         output = non_max_suppression(output, conf_thres=conf_thres, nms_thres=nms_thres)
 
         # Compute average precision for each sample
-        for si, (labels, detections) in enumerate(zip(targets, output)):
+        for si, detections in enumerate(output):
+            labels = targets[targets[:, 0] == si, 1:]
             seen += 1
 
             if detections is None:
                 # If there are labels but no detections mark as zero AP
-                if labels.size(0) != 0:
-                    mAPs.append(0), mR.append(0), mP.append(0)
+                if len(labels) != 0:
+                    mP.append(0), mR.append(0), mAPs.append(0)
                 continue
 
             # Get detections sorted by decreasing confidence scores
-            detections = detections.cpu().numpy()
-            detections = detections[np.argsort(-detections[:, 4])]
+            detections = detections[(-detections[:, 4]).argsort()]
 
             if save_json:
                 # [{"image_id": 42, "category_id": 18, "bbox": [258.15, 41.29, 348.26, 243.78], "score": 0.236}, ...
-                box = torch.from_numpy(detections[:, :4]).clone()  # xyxy
+                box = detections[:, :4].clone()  # xyxy
                 scale_coords(img_size, box, shapes[si])  # to original shape
                 box = xyxy2xywh(box)  # xywh
                 box[:, :2] -= box[:, 2:] / 2  # xy center to top-left corner
@@ -86,49 +87,46 @@ def test(
 
             # If no labels add number of detections as incorrect
             correct = []
-            if labels.size(0) == 0:
+            if len(labels) == 0:
                 # correct.extend([0 for _ in range(len(detections))])
-                mAPs.append(0), mR.append(0), mP.append(0)
+                mP.append(0), mR.append(0), mAPs.append(0)
                 continue
             else:
+                # Extract target boxes as (x1, y1, x2, y2)
+                target_box = xywh2xyxy(labels[:, 1:5]) * img_size
                 target_cls = labels[:, 0]
 
-                # Extract target boxes as (x1, y1, x2, y2)
-                target_boxes = xywh2xyxy(labels[:, 1:5]) * img_size
-
                 detected = []
-                for *pred_bbox, conf, obj_conf, obj_pred in detections:
-                    pred_bbox = torch.FloatTensor(pred_bbox).view(1, -1)
-                    # Compute iou with target boxes
-                    iou = bbox_iou(pred_bbox, target_boxes)
-                    # Extract index of largest overlap
-                    best_i = np.argmax(iou)
-                    # If overlap exceeds threshold and classification is correct mark as correct
-                    if iou[best_i] > iou_thres and obj_pred == labels[best_i, 0] and best_i not in detected:
+                for *pred_box, conf, cls_conf, cls_pred in detections:
+                    # Best iou, index between pred and targets
+                    iou, bi = bbox_iou(pred_box, target_box).max(0)
+
+                    # If iou > threshold and class is correct mark as correct
+                    if iou > iou_thres and cls_pred == target_cls[bi] and bi not in detected:
                         correct.append(1)
-                        detected.append(best_i)
+                        detected.append(bi)
                     else:
                         correct.append(0)
 
             # Compute Average Precision (AP) per class
-            AP, AP_class, R, P = ap_per_class(tp=correct,
-                                              conf=detections[:, 4],
-                                              pred_cls=detections[:, 6],
-                                              target_cls=target_cls)
+            AP, AP_class, R, P = ap_per_class(tp=np.array(correct),
+                                              conf=detections[:, 4].cpu().numpy(),
+                                              pred_cls=detections[:, 6].cpu().numpy(),
+                                              target_cls=target_cls.cpu().numpy())
 
             # Accumulate AP per class
             AP_accum_count += np.bincount(AP_class, minlength=nC)
             AP_accum += np.bincount(AP_class, minlength=nC, weights=AP)
 
             # Compute mean AP across all classes in this image, and append to image list
-            mAPs.append(AP.mean())
-            mR.append(R.mean())
             mP.append(P.mean())
+            mR.append(R.mean())
+            mAPs.append(AP.mean())
 
             # Means of all images
-            mean_mAP = np.mean(mAPs)
-            mean_R = np.mean(mR)
             mean_P = np.mean(mP)
+            mean_R = np.mean(mR)
+            mean_mAP = np.mean(mAPs)
 
         # Print image mAP and running mean mAP
     #     print(('%11s%11s' + '%11.3g' * 4 + 's') %
@@ -141,7 +139,7 @@ def test(
     #     print('%15s: %-.4f' % (c, AP_accum[i] / (AP_accum_count[i] + 1E-16)))
 
     # Return mAP
-    return mean_mAP, mean_R, mean_P
+    return mean_P, mean_R, mean_mAP
 
 
 if __name__ == '__main__':
@@ -166,29 +164,4 @@ if __name__ == '__main__':
             opt.iou_thres,
             opt.conf_thres,
             opt.nms_thres,
-            opt.save_json
-        )
-
-#       Image      Total          P          R        mAP  # YOLOv3 320
-#          32       5000       0.66      0.597      0.591
-#          64       5000      0.664       0.62      0.604
-#          96       5000      0.653      0.627      0.614
-#         128       5000      0.639      0.623      0.607
-#         160       5000      0.642       0.63      0.616
-#         192       5000      0.651      0.636      0.621
-
-#       Image      Total          P          R        mAP  # YOLOv3 416
-#          32       5000      0.635      0.581       0.57
-#          64       5000       0.63      0.591      0.578
-#          96       5000      0.661      0.632      0.622
-#         128       5000      0.659      0.632      0.623
-#         160       5000      0.665       0.64      0.633
-#         192       5000       0.66      0.637       0.63
-
-#       Image      Total          P          R        mAP  # YOLOv3 608
-#          32       5000      0.653      0.606      0.591
-#          64       5000      0.653      0.635      0.625
-#          96       5000      0.655      0.642      0.633
-#         128       5000      0.667      0.651      0.642
-#         160       5000      0.663      0.645      0.637
-#         192       5000      0.663      0.643      0.634
+            opt.save_json)

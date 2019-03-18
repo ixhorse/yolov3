@@ -4,9 +4,12 @@
 sudo rm -rf yolov3 && git clone https://github.com/ultralytics/yolov3
 bash yolov3/data/get_coco_dataset.sh
 sudo rm -rf cocoapi && git clone https://github.com/cocodataset/cocoapi && cd cocoapi/PythonAPI && make && cd ../.. && cp -r cocoapi/PythonAPI/pycocotools yolov3
+sudo shutdown
 
 # Start
-python3 train.py
+sudo rm -rf yolov3 && git clone https://github.com/ultralytics/yolov3
+cp -r weights yolov3
+cd yolov3 && python3 train.py --batch-size 26
 
 # Resume
 python3 train.py --resume
@@ -14,6 +17,14 @@ python3 train.py --resume
 # Detect
 gsutil cp gs://ultralytics/yolov3.pt yolov3/weights
 python3 detect.py
+
+# Clone branch
+sudo rm -rf yolov3 && git clone -b multi_gpu --depth 1 https://github.com/ultralytics/yolov3
+cd yolov3 && python3 train.py --batch-size 26
+
+sudo rm -rf yolov3 && git clone -b multigpu --depth 1 https://github.com/alexpolichroniadis/yolov3
+cp coco.data yolov3/cfg
+cd yolov3 && python3 train.py --batch-size 26
 
 # Test
 sudo rm -rf yolov3 && git clone https://github.com/ultralytics/yolov3
