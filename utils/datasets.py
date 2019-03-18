@@ -128,9 +128,9 @@ class LoadImagesAndLabels(Dataset):  # for training
             # hsv
             img = augment_hsv(img, fraction=0.5)
             # pad and resize
-            img, labels = letterbox(img, labels.copy(), height=height, mode='test')
+            img, labels = letterbox(img, labels.copy(), height=height, mode=self.mode)
             # Augment image and labels
-            img, labels, M = random_affine(img, labels.copy(), degrees=(-5, 5), translate=(0.10, 0.10), scale=(0.90, 1.20))
+            img, labels, M = random_affine(img, labels.copy(), degrees=(-5, 5), translate=(0.10, 0.10), scale=(0.90, 1.10))
             # random left-right flip
             img, labels = random_flip(img, labels.copy(), 0.5)
             # color distort
@@ -206,8 +206,8 @@ def letterbox(img, labels, height=416, mode='train', color=(127.5, 127.5, 127.5)
     else:
         dw = random.randint(0, max(shape) - shape[1])
         dh = random.randint(0, max(shape) - shape[0])
-        left, right = dw - 0.1, max(shape) - shape[1] - dw
-        top, bottom = dh - 0.1, max(shape) - shape[0] - dh
+        left, right = dw, max(shape) - shape[1] - dw
+        top, bottom = dh, max(shape) - shape[0] - dh
     img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # padded square
     interp = np.random.randint(0, 5)
     img = cv2.resize(img, (height, height), interpolation=interp)  # resized, no border

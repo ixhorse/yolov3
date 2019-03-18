@@ -34,7 +34,7 @@ def train(
     train_dataset = VOCDetection(root=os.path.join('~', 'data', 'VOCdevkit'),
         batch_size=batch_size, img_size=img_size, multi_scale=multi_scale, mode='train')
     dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size,
-        num_workers=8, pin_memory=False, shuffle=True, drop_last=True)
+        num_workers=8, pin_memory=True, shuffle=True, drop_last=True)
 
     lr0 = 0.001
     cutoff = -1  # backbone reaches to cutoff layer
@@ -60,16 +60,16 @@ def train(
 
     else:
         # Initialize model with backbone (optional)
-        if cfg.endswith('yolov3.cfg'):
-            load_darknet_weights(model, 'weights/darknet53.conv.74')
-            cutoff = 75
-        elif cfg.endswith('yolov3-tiny.cfg'):
+        if cfg.endswith('yolov3-tiny.cfg'):
             load_darknet_weights(model, 'weights/yolov3-tiny.conv.15')
             cutoff = 15
+        else:
+            load_darknet_weights(model, 'weights/darknet53.conv.74')
+            cutoff = 75
 
         model.to(device).train()
         optimizer = torch.optim.SGD(filter(lambda x: x.requires_grad, model.parameters()), lr=lr0, momentum=.9)
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[60, 80], gamma=0.1)
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[45, 80], gamma=0.1)
 
     # Start training
     t0 = time.time()
@@ -80,7 +80,7 @@ def train(
         scheduler.step()
 
         # Freeze darknet53.conv.74 for first epoch
-        if freeze_backbone and (epoch < 2):
+        if freeze_backbone and (epoch < 1):
             for i, (name, p) in enumerate(model.named_parameters()):
                 if int(name.split('.')[1]) < cutoff:  # if layer < 75
                     p.requires_grad = False if (epoch == 0) else True
@@ -111,7 +111,7 @@ def train(
             ui += 1
             for key, val in model.losses.items():
                 rloss[key] = (rloss[key] * ui + val) / (ui + 1)
-            if(i % 20 == 0):
+            if(i % 30 == 0):
                 print(('%8s%12s' + '%10.3g' * 7) % ('%g/%g' % (epoch, epochs - 1), '%g/%g' % (i, len(dataloader) - 1),
                     rloss['xy'], rloss['wh'], rloss['conf'], rloss['cls'], rloss['loss'], model.losses['nT'], time.time() - t0))
             t0 = time.time()
