@@ -17,7 +17,6 @@ def train(
         accumulated_batches=1,
         multi_scale=False,
         freeze_backbone=False,
-        var=0,
 ):
     np.random.seed(666)
     device = torch_utils.select_device()
@@ -44,8 +43,6 @@ def train(
         checkpoint = torch.load(resume, map_location='cpu')
         model.load_state_dict(checkpoint['model'])
 
-        model.to(device).train()
-
         # Transfer learning (train only YOLO layers)
         # for i, (name, p) in enumerate(model.named_parameters()):
         #     p.requires_grad = True if (p.shape[0] == 255) else False
@@ -67,17 +64,29 @@ def train(
             load_darknet_weights(model, 'weights/darknet53.conv.74')
             cutoff = 75
 
-        model.to(device).train()
+        # Set optimizer
         optimizer = torch.optim.SGD(filter(lambda x: x.requires_grad, model.parameters()), lr=lr0, momentum=.9)
+
+    if torch.cuda.device_count() > 1:
+        model = nn.DataParallel(model)
+    model.to(device).train()
+
+    # Set scheduler
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[45, 80], gamma=0.1)
 
     # Start training
     t0 = time.time()
-    # model_info(model)
-    n_burnin = 1000  # number of burn-in batches
-    for epoch in range(start_epoch, epochs):
-        print(('%8s%12s' + '%10s' * 7) % ('Epoch', 'Batch', 'xy', 'wh', 'conf', 'cls', 'total', 'nTargets', 'time'))
-        scheduler.step()
+    model_info(model)
+    n_burnin = min(round(dataloader.nB / 5 + 1), 1000)  # number of burn-in batches
+    for epoch in range(epochs):
+        model.train()
+        epoch += start_epoch
+
+        print(('\n%8s%12s' + '%10s' * 7) % (
+            'Epoch', 'Batch', 'xy', 'wh', 'conf', 'cls', 'total', 'nTargets', 'time'))
+
+        # Update scheduler (automatic)
+        # scheduler.step()
 
         # Freeze darknet53.conv.74 for first epoch
         if freeze_backbone and (epoch < 1):
@@ -87,7 +96,7 @@ def train(
 
         ui = -1
         rloss = defaultdict(float)  # running loss
-
+        optimizer.zero_grad()
         for i, (imgs, targets, numboxes, _) in enumerate(dataloader):
             if sum(numboxes) < 1:  # if no targets continue
                 continue
@@ -101,15 +110,20 @@ def train(
             imgs = imgs.float().to(device)
             targets = [targets[i, :nL, :].float() for i,nL in enumerate(numboxes)]
             optimizer.zero_grad()
+            # Run model
+            pred = model(imgs.to(device))
+
+            # Build targets
+            target_list = build_targets(model, targets, pred)
 
             # Compute loss
-            loss = model(imgs, targets, var=var)
+            loss, loss_dict = compute_loss(pred, target_list)
             loss.backward()
             optimizer.step()
 
             # Running epoch-means of tracked metrics
             ui += 1
-            for key, val in model.losses.items():
+            for key, val in loss_dict.items():
                 rloss[key] = (rloss[key] * ui + val) / (ui + 1)
             if(i % 30 == 0):
                 print(('%8s%12s' + '%10.3g' * 7) % ('%g/%g' % (epoch, epochs - 1), '%g/%g' % (i, len(dataloader) - 1),
@@ -123,7 +137,7 @@ def train(
         # Save latest checkpoint
         checkpoint = {'epoch': epoch,
                       'best_loss': best_loss,
-                      'model': model.state_dict(),
+                      'model': model.module.state_dict() if type(model) is nn.DataParallel else model.state_dict(),
                       'optimizer': optimizer.state_dict()}
         if epoch % 5 == 0:
             torch.save(checkpoint, 'weights/epoch_%03d.pt' % epoch)
@@ -135,7 +149,7 @@ def train(
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--epochs', type=int, default=100, help='number of epochs')
+    parser.add_argument('--epochs', type=int, default=270, help='number of epochs')
     parser.add_argument('--batch-size', type=int, default=16, help='size of each image batch')
     parser.add_argument('--accumulated-batches', type=int, default=1, help='number of batches before optimizer step')
     parser.add_argument('--cfg', type=str, default='cfg/yolov3.cfg', help='cfg file path')
@@ -156,5 +170,4 @@ if __name__ == '__main__':
         batch_size=opt.batch_size,
         accumulated_batches=opt.accumulated_batches,
         multi_scale=opt.multi_scale,
-        var=opt.var,
     )
