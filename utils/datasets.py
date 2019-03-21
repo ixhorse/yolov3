@@ -74,7 +74,7 @@ class LoadWebcam:  # for inference
         ret_val, img0 = self.cam.read()
         assert ret_val, 'Webcam Error'
         img_path = 'webcam_%g.jpg' % self.count
-        img0 = cv2.flip(img0, 1)
+        img0 = cv2.flip(img0, 1)  # flip left-right
 
         # Padded resize
         img, _, _, _ = letterbox(img0, height=self.height, mode='test')
@@ -111,12 +111,7 @@ class LoadImagesAndLabels(Dataset):  # for training
         assert index <= len(self), 'index range error'
         index = self.shuffled_vector[index]
 
-        if self.multi_scale:
-            # Multi-Scale YOLO Training
-            height = random.choice(range(10, 20)) * 32  # 320 - 608 pixels
-        else:
-            # Fixed-Scale YOLO Training
-            height = self.height
+        return self.load_images(ia, ib)
 
         # read img and label
         img = cv2.imread(self.img_files[index])  # BGR

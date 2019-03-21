@@ -107,23 +107,22 @@ class YOLOLayer(nn.Module):
         self.nA = len(anchors)  # number of anchors (3)
         self.nC = nC  # number of classes (80)
         self.img_size = 0
-
-        # if ONNX_EXPORT:  # grids must be computed in __init__
-        stride = [32, 16, 8][yolo_layer]  # stride of this layer
-        if cfg.endswith('yolov3-tiny.cfg'):
-            stride *= 2
-
-        nG = int(img_size / stride)  # number grid points
-
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        create_grids(self, img_size, nG, device)
+        create_grids(self, 32, 1, device=device)
+
+        if ONNX_EXPORT:  # grids must be computed in __init__
+            stride = [32, 16, 8][yolo_layer]  # stride of this layer
+            if cfg.endswith('yolov3-tiny.cfg'):
+                stride *= 2
+
+            nG = int(img_size / stride)  # number grid points
+            create_grids(self, img_size, nG)
 
     def forward(self, p, img_size, var=None):
         if ONNX_EXPORT:
             bs, nG = 1, self.nG  # batch size, grid size
         else:
             bs, nG = p.shape[0], p.shape[-1]
-
             if self.img_size != img_size:
                 create_grids(self, img_size, nG, p.device)
 
@@ -216,7 +215,8 @@ def get_yolo_layers(model):
     return [i for i, x in enumerate(a) if x]  # [82, 94, 106] for yolov3
 
 
-def create_grids(self, img_size, nG, device):
+def create_grids(self, img_size, nG, device='cpu'):
+    self.img_size = img_size
     self.stride = img_size / nG
 
     # build xy offsets
@@ -295,11 +295,7 @@ def load_darknet_weights(self, weights, cutoff=-1):
             conv_layer.weight.data.copy_(conv_w)
             ptr += num_w
 
-
-"""
-    @:param path    - path of the new weights file
-    @:param cutoff  - save layers between 0 and cutoff (cutoff = -1 -> all are saved)
-"""
+    return cutoff
 
 
 def save_weights(self, path, cutoff=-1):
