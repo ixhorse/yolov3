@@ -91,17 +91,13 @@ class LoadWebcam:  # for inference
 
 
 class LoadImagesAndLabels(Dataset):  # for training
-    def __init__(self, img_files, label_files=None, batch_size=1,
-                 img_size=608, multi_scale=False, mode='train'):
+    def __init__(self, img_files, label_files=None, img_size=608, mode='train'):
         self.img_files = img_files
         self.label_files = label_files if label_files else \
                             [x.replace('images', 'labels').replace('.png', '.txt').replace('.jpg', '.txt')
                             for x in self.img_files]
         self.nF = len(self.img_files)  # number of image files
-        self.nB = math.ceil(self.nF / batch_size)  # number of batches
-        self.batch_size = batch_size
         self.height = img_size
-        self.multi_scale = multi_scale
         self.mode = mode
         self.shuffled_vector = np.random.permutation(self.nF)
 
@@ -110,9 +106,6 @@ class LoadImagesAndLabels(Dataset):  # for training
     def __getitem__(self, index):
         assert index <= len(self), 'index range error'
         index = self.shuffled_vector[index]
-
-        return self.load_images(ia, ib)
-
         # read img and label
         img = cv2.imread(self.img_files[index])  # BGR
         assert img is not None, 'File Not Found ' + self.img_files[index]
@@ -123,16 +116,16 @@ class LoadImagesAndLabels(Dataset):  # for training
             # hsv
             img = augment_hsv(img, fraction=0.5)
             # pad and resize
-            img, labels = letterbox(img, labels.copy(), height=height, mode=self.mode)
+            img, labels = letterbox(img, labels, height=self.height, mode='test')
             # Augment image and labels
-            img, labels, M = random_affine(img, labels.copy(), degrees=(-5, 5), translate=(0.10, 0.10), scale=(0.90, 1.10))
+            img, labels, M = random_affine(img, labels, degrees=(-5, 5), translate=(0.10, 0.10), scale=(0.90, 1.10))
             # random left-right flip
-            img, labels = random_flip(img, labels.copy(), 0.5)
+            img, labels = random_flip(img, labels, 0.5)
             # color distort
             # img = random_color_distort(img)
         else:
             # pad and resize
-            img, labels = letterbox(img, labels, height=height, mode=self.mode)
+            img, labels = letterbox(img, labels, height=self.height, mode=self.mode)
 
         # show_image(img, labels)
 
@@ -140,14 +133,19 @@ class LoadImagesAndLabels(Dataset):  # for training
         if nL > 0:
             # convert xyxy to xywh
             labels = np.clip(labels, 0, self.height - 1)
-            labels[:, 1:5] = xyxy2xywh(labels[:, 1:5].copy()) / height
+            labels[:, 1:5] = xyxy2xywh(labels[:, 1:5].copy()) / self.height
 
         # Normalize
         img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB
         img = np.ascontiguousarray(img, dtype=np.float32)
         img = normalize(img)
-        labels = np.vstack((labels, np.zeros((100-nL, 5), dtype=np.float32)))
-        return (img, labels, nL, (h,w))
+        
+        labels = np.concatenate((np.ones((nL, 1), dtype=np.float32), labels), 1)
+        labels = np.vstack((labels, np.zeros((100-nL, 6), dtype=np.float32)))
+
+        img = torch.from_numpy(img).float()
+        labels = torch.from_numpy(labels).float()
+        return (img, labels, (h,w))
 
     def _load_label(self, label_path):
         if os.path.isfile(label_path):
@@ -304,9 +302,9 @@ def normalize(img, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
     norm = (x - mean) / std
     """
     img = img / 255.0
-    mean = np.array(mean)
-    std = np.array(std)
-    img = (img - mean[:, np.newaxis, np.newaxis]) / std[:, np.newaxis, np.newaxis]
+    #mean = np.array(mean)
+    #std = np.array(std)
+    #img = (img - mean[:, np.newaxis, np.newaxis]) / std[:, np.newaxis, np.newaxis]
     return img.astype(np.float32)
 
 

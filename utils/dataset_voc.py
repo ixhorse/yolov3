@@ -19,8 +19,7 @@ class VOCDetection(LoadImagesAndLabels):
                'person', 'pottedplant', 'sheep', 'sofa', 'train', 'tvmonitor')
 
     def __init__(self, root=os.path.join('~', 'data', 'voc', 'VOCdevkit'),
-                splits=((2007, 'trainval'), (2012, 'trainval')),
-                batch_size=1, img_size=608, multi_scale=False, mode='train'):
+                splits=((2007, 'trainval'), (2012, 'trainval')), img_size=608, mode='train'):
         self._root = os.path.expanduser(root)
         self._splits = splits
         self._items = self._load_items(splits)
@@ -30,8 +29,7 @@ class VOCDetection(LoadImagesAndLabels):
         self._label_files = [self._anno_path.format(*x) for x in self._items]
         self.index_map = dict(zip(self.classes, range(self.num_class)))
 
-        super(VOCDetection, self).__init__(self._img_files, self._label_files, batch_size,
-                                            img_size, multi_scale, mode)
+        super(VOCDetection, self).__init__(self._img_files, self._label_files, img_size, mode)
 
 
     @property

@@ -6,6 +6,8 @@ from models import *
 from utils.datasets import *
 from utils.utils import *
 from utils.dataset_voc import VOCDetection
+
+import torch
 import pdb
 
 def train(
@@ -30,8 +32,7 @@ def train(
     model = Darknet(cfg, img_size)
 
     # Get dataloader
-    train_dataset = VOCDetection(root=os.path.join('~', 'data', 'VOCdevkit'),
-        batch_size=batch_size, img_size=img_size, multi_scale=multi_scale, mode='train')
+    train_dataset = VOCDetection(root=os.path.join('~', 'data', 'VOCdevkit'), img_size=img_size, mode='train')
     dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size,
         num_workers=8, pin_memory=True, shuffle=True, drop_last=True)
 
@@ -58,9 +59,9 @@ def train(
     else:
         # Initialize model with backbone (optional)
         if cfg.endswith('yolov3-tiny.cfg'):
-            cutoff = load_darknet_weights(model, weights + 'yolov3-tiny.conv.15')
+            cutoff = load_darknet_weights(model, 'weights/yolov3-tiny.conv.15')
         else:
-            cutoff = load_darknet_weights(model, weights + 'darknet53.conv.74')
+            cutoff = load_darknet_weights(model, 'weights/darknet53.conv.74')
 
         # Set optimizer
         optimizer = torch.optim.SGD(model.parameters(), lr=lr0, momentum=.9)
@@ -74,17 +75,17 @@ def train(
 
     # Start training
     t0 = time.time()
-    model_info(model)
+    # model_info(model)
     n_burnin = min(round(len(dataloader) / 5 + 1), 1000)  # burn-in batches
     for epoch in range(epochs):
         model.train()
         epoch += start_epoch
 
-        print(('\n%8s%12s' + '%10s' * 7) % (
-            'Epoch', 'Batch', 'xy', 'wh', 'conf', 'cls', 'total', 'nTargets', 'time'))
+        print(('\n%8s%12s' + '%10s' * 6) % (
+            'Epoch', 'Batch', 'xy', 'wh', 'conf', 'cls', 'total', 'time'))
 
         # Update scheduler (automatic)
-        # scheduler.step()
+        scheduler.step()
 
         # Freeze darknet53.conv.74 for first epoch
         if freeze_backbone and (epoch < 1):
@@ -94,19 +95,23 @@ def train(
 
         ui = -1
         rloss = defaultdict(float)  # running loss
-        optimizer.zero_grad()
-        for i, (imgs, targets, numboxes, _) in enumerate(dataloader):
-            if sum(numboxes) < 1:  # if no targets continue
-                continue
+        
+        for i, (imgs, targets, _) in enumerate(dataloader):
+            imgs = imgs.to(device)
+            # convert to [imgidx, cls, x, y, w, h] 
+            new_targets = []   
+            for idx, target in enumerate(targets):
+                target = target[target[:, 0] == 1]
+                target[:, 0] = idx
+                new_targets.append(target)
+            targets = torch.cat(new_targets, 0).to(device)
 
-             # SGD burn-in
+            # SGD burn-in
             # if (epoch == 0) & (i <= n_burnin):
             #     lr = lr0 * (i / n_burnin) ** 4
             #     for g in optimizer.param_groups:
-            #         g['lr'] = lr
-
-            imgs = imgs.float().to(device)
-            targets = [targets[i, :nL, :].float() for i,nL in enumerate(numboxes)]
+            #         g['lr'] = lr 
+                       
             optimizer.zero_grad()
             # Run model
             pred = model(imgs.to(device))
@@ -116,6 +121,7 @@ def train(
 
             # Compute loss
             loss, loss_dict = compute_loss(pred, target_list)
+
             loss.backward()
             optimizer.step()
 
@@ -123,9 +129,10 @@ def train(
             ui += 1
             for key, val in loss_dict.items():
                 rloss[key] = (rloss[key] * ui + val) / (ui + 1)
+
             if(i % 30 == 0):
-                print(('%8s%12s' + '%10.3g' * 7) % ('%g/%g' % (epoch, epochs - 1), '%g/%g' % (i, len(dataloader) - 1),
-                    rloss['xy'], rloss['wh'], rloss['conf'], rloss['cls'], rloss['loss'], model.losses['nT'], time.time() - t0))
+                print(('%8s%12s' + '%10.3g' * 6) % ('%g/%g' % (epoch, epochs - 1), '%g/%g' % (i, len(dataloader) - 1),
+                    rloss['xy'], rloss['wh'], rloss['conf'], rloss['cls'], rloss['total'], time.time() - t0))
             t0 = time.time()
 
             # Multi-Scale training (320 - 608 pixels) every 10 batches
@@ -134,8 +141,8 @@ def train(
                 print('multi_scale img_size = %g' % dataloader.img_size)
 
         # Update best loss
-        if rloss['loss'] < best_loss:
-            best_loss = rloss['loss']
+        if rloss['total'] < best_loss:
+            best_loss = rloss['total']
 
         # Save latest checkpoint
         checkpoint = {'epoch': epoch,
@@ -147,8 +154,8 @@ def train(
         
         if epoch > 19 and epoch % 10 == 0:
             with torch.no_grad():
-                mAP, R, P = test.test(cfg, weights='weights/epoch_%03d.pt'%epoch, batch_size=32, img_size=img_size)
-                print(mAP, R, P)
+                P, R, mAP = test.test(cfg, weights='weights/epoch_%03d.pt'%epoch, batch_size=32, img_size=img_size)
+                print(P, R, mAP)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

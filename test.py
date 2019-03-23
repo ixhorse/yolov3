@@ -36,7 +36,7 @@ def test(
 
     # Get dataloader
     vocset = VOCDetection(root=os.path.join('~', 'data', 'VOCdevkit'), splits=((2007, 'test'),),
-                        batch_size=batch_size, img_size=img_size, mode='test')
+                        img_size=img_size, mode='test')
     dataloader = torch.utils.data.DataLoader(vocset, batch_size=batch_size, num_workers=16)
 
     nC = vocset.num_class #num class
@@ -47,17 +47,18 @@ def test(
     mP, mR, mAPs, TP, jdict = [], [], [], [], []
     AP_accum, AP_accum_count = np.zeros(nC), np.zeros(nC)
     coco91class = coco80_to_coco91_class()
-    for batch_i, (imgs, targets, numboxes, shapes) in enumerate(dataloader):
+    for batch_i, (imgs, targets, shapes) in enumerate(dataloader):
         targets = targets.to(device)
         t = time.time()
         # pdb.set_trace()
-        targets = [targets[i, :nL, :].float() for i,nL in enumerate(numboxes)]
-        output = model(imgs.to(device))
+        # targets = [targets[i, :nL, :].float() for i,nL in enumerate(numboxes)]
+        output = model(imgs.to(device))        
         output = non_max_suppression(output, conf_thres=conf_thres, nms_thres=nms_thres)
 
         # Compute average precision for each sample
         for si, detections in enumerate(output):
-            labels = targets[targets[:, 0] == si, 1:]
+            # labels = targets[targets[:, 0] == si, 1:]
+            labels = targets[si][targets[si, :, 0] == 1, 1:]
             seen += 1
 
             if detections is None:
@@ -129,14 +130,14 @@ def test(
             mean_mAP = np.mean(mAPs)
 
         # Print image mAP and running mean mAP
-    #     print(('%11s%11s' + '%11.3g' * 4 + 's') %
-    #           (seen, vocset.nF, mean_P, mean_R, mean_mAP, time.time() - t))
-    #
-    # # Print mAP per class
-    # print('%11s' * 5 % ('Image', 'Total', 'P', 'R', 'mAP') + '\n\nmAP Per Class:')
-    #
-    # for i, c in enumerate(classes):
-    #     print('%15s: %-.4f' % (c, AP_accum[i] / (AP_accum_count[i] + 1E-16)))
+        print(('%11s%11s' + '%11.3g' * 4 + 's') %
+              (seen, vocset.nF, mean_P, mean_R, mean_mAP, time.time() - t))
+
+    # Print mAP per class
+    print('\nmAP Per Class:')
+    for i, c in enumerate(classes):
+        if AP_accum_count[i]:
+            print('%15s: %-.4f' % (c, AP_accum[i] / (AP_accum_count[i])))
 
     # Return mAP
     return mean_P, mean_R, mean_mAP
