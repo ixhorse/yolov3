@@ -120,7 +120,7 @@ class LoadImagesAndLabels(Dataset):  # for training
             # pad and resize
             img, labels = letterbox(img, labels, height=self.height, mode='test')
             # Augment image and labels
-            img, labels, M = random_affine(img, labels, degrees=(-5, 5), translate=(0.10, 0.10), scale=(0.90, 1.10))
+            img, labels = random_affine(img, labels, degrees=(-5, 5), translate=(0.10, 0.10), scale=(0.90, 1.10))
             # random left-right flip
             img, labels = random_flip(img, labels, 0.5)
             # color distort
@@ -147,11 +147,11 @@ class LoadImagesAndLabels(Dataset):  # for training
             labels_out[:, 1:] = torch.from_numpy(labels)
 
         img = torch.from_numpy(img).float()
-        labels = labels.float()
+        labels_out = labels_out.float()
         shape = np.array([h,w], dtype=np.float32)
-        return (img, labels, shape, self.img_files[index])
+        return (img, labels_out, shape, self.img_files[index])
     
-     @staticmethod
+    @staticmethod
     def collate_fn(batch):
         img, label, hw, path = list(zip(*batch))  # transposed
         for i, l in enumerate(label):

@@ -108,6 +108,10 @@ def train(
             imgs = imgs.to(device)
             targets = targets.to(device)
 
+            nT = len(targets)
+            if nT == 0:  # if no targets continue
+                continue
+
             # Plot images with bounding boxes
             plot_images = False
             if plot_images:
@@ -150,7 +154,8 @@ def train(
                 mloss['xy'], mloss['wh'], mloss['conf'], mloss['cls'],
                 mloss['total'], nT, time.time() - t)
             t = time.time()
-            print(s)
+            if i % 30 == 0:
+                print(s)
 
             # Multi-Scale training (320 - 608 pixels) every 10 batches
             if multi_scale and (i + 1) % 10 == 0:
