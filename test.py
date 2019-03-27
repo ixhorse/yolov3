@@ -39,7 +39,10 @@ def test(
     # Get dataloader
     vocset = VOCDetection(root=os.path.join('~', 'data', 'VOCdevkit'), splits=((2007, 'test'),),
                         img_size=img_size, mode='test')
-    dataloader = torch.utils.data.DataLoader(vocset, batch_size=batch_size, num_workers=16)
+    dataloader = torch.utils.data.DataLoader(vocset, 
+                                            batch_size=batch_size, 
+                                            num_workers=16,
+                                            collate_fn=vocset.collate_fn)
 
     nC = vocset.num_class #num class
     classes = vocset.classes
