@@ -17,7 +17,7 @@ This directory contains python software and an iOS App developed by Ultralytics 
 
 # Description
 
-The https://github.com/ultralytics/yolov3 repo contains inference and training code for YOLOv3 in PyTorch. The code works on Linux, MacOS and Windows. Training is done on the COCO dataset by default: https://cocodataset.org/#home. **Credit to Joseph Redmon for YOLO** (https://pjreddie.com/darknet/yolo/) and to **Erik Lindernoren for the PyTorch implementation** this work is based on (https://github.com/eriklindernoren/PyTorch-YOLOv3).
+The https://github.com/ultralytics/yolov3 repo contains inference and training code for YOLOv3 in PyTorch. The code works on Linux, MacOS and Windows. Training is done on the COCO dataset by default: https://cocodataset.org/#home. **Credit to Joseph Redmon for YOLO: ** https://pjreddie.com/darknet/yolo/.
 
 # Requirements
 
@@ -26,6 +26,7 @@ Python 3.7 or later with the following `pip3 install -U -r requirements.txt` pac
 - `numpy`
 - `torch >= 1.0.0`
 - `opencv-python`
+- `tqdm`
 
 # Tutorials
 
@@ -64,27 +65,35 @@ HS**V** Intensity | +/- 50%
 ## Speed
 
 https://cloud.google.com/deep-learning-vm/  
-**Machine type:** n1-highmem-4 (4 vCPUs, 26 GB memory)  
+**Machine type:** n1-standard-8 (8 vCPUs, 30 GB memory)  
 **CPU platform:** Intel Skylake  
-**GPUs:** 1-4 x NVIDIA Tesla P100  
+**GPUs:** 1-4x P100 ($0.493/hr), 1-8x V100 ($0.803/hr)  
 **HDD:** 100 GB SSD  
+**Dataset:** COCO train 2014 
 
-GPUs | `batch_size` | speed | COCO epoch
---- |---| --- | --- 
-(P100)   |  (images)  | (s/batch) | (min/epoch)
-1 | 16 | 0.54s  | 66min
-2 | 32 | 0.99s | 61min
-4 | 64 | 1.61s | 49min
+GPUs | `batch_size` | batch time | epoch time | epoch cost
+--- |---| --- | --- | --- 
+<i></i> |  (images)  | (s/batch) |  |
+1 P100 | 16 | 0.39s  | 48min  | $0.39
+2 P100 | 32 | 0.48s | 29min | $0.47
+4 P100 | 64 | 0.65s | 20min | $0.65
+1 V100 | 16 | 0.25s  | 31min | $0.41
+2 V100 | 32 | 0.29s | 18min | $0.48
+4 V100 | 64 | 0.41s | 13min | $0.70
+8 V100 | 128 | 0.49s | 7min | $0.80
 
 # Inference
 
 Run `detect.py` to apply trained weights to an image, such as `zidane.jpg` from the `data/samples` folder:
 
-**YOLOv3:** `detect.py --cfg cfg/yolov3.cfg --weights weights/yolov3.pt`
-<img src="https://user-images.githubusercontent.com/26833433/50524393-b0adc200-0ad5-11e9-9335-4774a1e52374.jpg" width="700">
+**YOLOv3:** `python3 detect.py --cfg cfg/yolov3.cfg --weights weights/yolov3.weights`
+<img src="https://user-images.githubusercontent.com/26833433/50524393-b0adc200-0ad5-11e9-9335-4774a1e52374.jpg" width="600">
 
-**YOLOv3-tiny:** `detect.py --cfg cfg/yolov3-tiny.cfg --weights weights/yolov3-tiny.pt`
-<img src="https://user-images.githubusercontent.com/26833433/50374155-21427380-05ea-11e9-8d24-f1a4b2bac1ad.jpg" width="700">
+**YOLOv3-tiny:** `python3 detect.py --cfg cfg/yolov3-tiny.cfg --weights weights/yolov3-tiny.weights`
+<img src="https://user-images.githubusercontent.com/26833433/50374155-21427380-05ea-11e9-8d24-f1a4b2bac1ad.jpg" width="600">
+
+**YOLOv3-SPP:** `python3 detect.py --cfg cfg/yolov3-spp.cfg --weights weights/yolov3-spp.weights`
+<img src="https://user-images.githubusercontent.com/26833433/54747926-e051ff00-4bd8-11e9-8b5d-93a41d871ec7.jpg" width="600">
 
 ## Webcam
 
