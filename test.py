@@ -1,12 +1,14 @@
 import argparse
 import json
 import time
+import shutil
 from pathlib import Path
 
 from models import *
 from utils.datasets import *
 from utils.dataset_voc import VOCDetection
 from utils.utils import *
+from eval.voc_eval import *
 import pdb
 
 def test(
@@ -17,7 +19,6 @@ def test(
         iou_thres=0.5,
         conf_thres=0.3,
         nms_thres=0.45,
-        save_json=False,
         model=None
 ):
     device = torch_utils.select_device()
@@ -42,105 +43,55 @@ def test(
     nC = vocset.num_class #num class
     classes = vocset.classes
 
-    mean_mAP, mean_R, mean_P, seen = 0.0, 0.0, 0.0, 0
-    print('%11s' * 5 % ('Image', 'Total', 'P', 'R', 'mAP'))
-    mP, mR, mAPs, TP, jdict = [], [], [], [], []
-    AP_accum, AP_accum_count = np.zeros(nC), np.zeros(nC)
-    coco91class = coco80_to_coco91_class()
-    for batch_i, (imgs, targets, shapes) in enumerate(dataloader):
-        targets = targets.to(device)
+    det_results_path = os.path.join('eval', 'results', 'VOC2007', 'Main')
+    if os.path.exists(det_results_path):
+        shutil.rmtree(det_results_path)
+    os.makedirs(det_results_path)
+
+    seen = 0
+    for batch_i, (imgs, targets, shapes, img_paths) in enumerate(dataloader):
         t = time.time()
-        # pdb.set_trace()
-        # targets = [targets[i, :nL, :].float() for i,nL in enumerate(numboxes)]
-        output = model(imgs.to(device))        
+        output = model(imgs.to(device))
+        # nms
         output = non_max_suppression(output, conf_thres=conf_thres, nms_thres=nms_thres)
 
-        # Compute average precision for each sample
         for si, detections in enumerate(output):
-            # labels = targets[targets[:, 0] == si, 1:]
-            labels = targets[si][targets[si, :, 0] == 1, 1:]
             seen += 1
-
             if detections is None:
-                # If there are labels but no detections mark as zero AP
-                if len(labels) != 0:
-                    mP.append(0), mR.append(0), mAPs.append(0)
                 continue
 
-            # Get detections sorted by decreasing confidence scores
-            detections = detections[(-detections[:, 4]).argsort()]
+            # remove bbox < conf_thres
+            detections = detections[detections[:, 4] > conf_thres]
+            # Rescale boxes from 416 to true image size
+            scale_coords(img_size, detections[:, :4], shapes[si]).round()
 
-            if save_json:
-                # [{"image_id": 42, "category_id": 18, "bbox": [258.15, 41.29, 348.26, 243.78], "score": 0.236}, ...
-                box = detections[:, :4].clone()  # xyxy
-                scale_coords(img_size, box, shapes[si])  # to original shape
-                box = xyxy2xywh(box)  # xywh
-                box[:, :2] -= box[:, 2:] / 2  # xy center to top-left corner
+            detections = detections.cpu().numpy()
+            image_ind = os.path.split(img_paths[si])[-1][:-4]
+            for bbox in detections:
+                coor = bbox[:4]
+                score = bbox[4] * bbox[5]
+                class_ind = int(bbox[6])
+                class_name = classes[class_ind]
+                score = score = '%.4f' % score
+                xmin, ymin, xmax, ymax = map(str, coor)
+                bbox_mess = ' '.join([image_ind, score, xmin, ymin, xmax, ymax]) + '\n'
+                with open(os.path.join(det_results_path, 'comp3_det_test_' + class_name + '.txt'), 'a') as f:
+                    f.write(bbox_mess)
 
-                # add to json dictionary
-                for di, d in enumerate(detections):
-                    jdict.append({
-                        'image_id': int(Path(paths[si]).stem.split('_')[-1]),
-                        'category_id': coco91class[int(d[6])],
-                        'bbox': [float3(x) for x in box[di]],
-                        'score': float3(d[4] * d[5])
-                    })
+        print(('%11s%11s' + '%11.3g') % (seen, vocset.nF, time.time() - t))
 
-            # If no labels add number of detections as incorrect
-            correct = []
-            if len(labels) == 0:
-                # correct.extend([0 for _ in range(len(detections))])
-                mP.append(0), mR.append(0), mAPs.append(0)
-                continue
-            else:
-                # Extract target boxes as (x1, y1, x2, y2)
-                target_box = xywh2xyxy(labels[:, 1:5]) * img_size
-                target_cls = labels[:, 0]
-
-                detected = []
-                for *pred_box, conf, cls_conf, cls_pred in detections:
-                    # Best iou, index between pred and targets
-                    iou, bi = bbox_iou(pred_box, target_box).max(0)
-
-                    # If iou > threshold and class is correct mark as correct
-                    if iou > iou_thres and cls_pred == target_cls[bi] and bi not in detected:
-                        correct.append(1)
-                        detected.append(bi)
-                    else:
-                        correct.append(0)
-
-            # Compute Average Precision (AP) per class
-            AP, AP_class, R, P = ap_per_class(tp=np.array(correct),
-                                              conf=detections[:, 4].cpu().numpy(),
-                                              pred_cls=detections[:, 6].cpu().numpy(),
-                                              target_cls=target_cls.cpu().numpy())
-
-            # Accumulate AP per class
-            AP_accum_count += np.bincount(AP_class, minlength=nC)
-            AP_accum += np.bincount(AP_class, minlength=nC, weights=AP)
-
-            # Compute mean AP across all classes in this image, and append to image list
-            mP.append(P.mean())
-            mR.append(R.mean())
-            mAPs.append(AP.mean())
-
-            # Means of all images
-            mean_P = np.mean(mP)
-            mean_R = np.mean(mR)
-            mean_mAP = np.mean(mAPs)
-
-        # Print image mAP and running mean mAP
-        print(('%11s%11s' + '%11.3g' * 4 + 's') %
-              (seen, vocset.nF, mean_P, mean_R, mean_mAP, time.time() - t))
-
-    # Print mAP per class
-    print('\nmAP Per Class:')
-    for i, c in enumerate(classes):
-        if AP_accum_count[i]:
-            print('%15s: %-.4f' % (c, AP_accum[i] / (AP_accum_count[i])))
-
-    # Return mAP
-    return mean_P, mean_R, mean_mAP
+    filename = os.path.join('eval', 'results', 'VOC2007', 'Main', 'comp3_det_test_{:s}.txt')
+    cachedir = os.path.join('eval', 'cache')
+    annopath = os.path.join(vocset._root, 'VOC2007', 'Annotations', '{:s}.xml')
+    imagesetfile = os.path.join(vocset._root, 'VOC2007', 'ImageSets', 'Main', 'test.txt')
+    APs = {}
+    for i, cls in enumerate(classes):
+        rec, prec, ap = voc_eval(filename, annopath, imagesetfile, cls, cachedir, iou_thres, False)
+        APs[cls] = ap
+    # if os.path.exists(cachedir):
+    #     shutil.rmtree(cachedir)
+    mAP = np.mean([APs[cls] for cls in APs])
+    return APs, mAP
 
 
 if __name__ == '__main__':
@@ -151,18 +102,17 @@ if __name__ == '__main__':
     parser.add_argument('--iou-thres', type=float, default=0.5, help='iou threshold required to qualify as detected')
     parser.add_argument('--conf-thres', type=float, default=0.3, help='object confidence threshold')
     parser.add_argument('--nms-thres', type=float, default=0.45, help='iou threshold for non-maximum suppression')
-    parser.add_argument('--save-json', action='store_true', help='save a cocoapi-compatible JSON results file')
     parser.add_argument('--img-size', type=int, default=416, help='size of each image dimension')
     opt = parser.parse_args()
     print(opt, end='\n\n')
 
     with torch.no_grad():
-        mAP = test(
+        APs, mAP = test(
             opt.cfg,
             opt.weights,
             opt.batch_size,
             opt.img_size,
             opt.iou_thres,
             opt.conf_thres,
-            opt.nms_thres,
-            opt.save_json)
+            opt.nms_thres)
+        print(APs, mAP)

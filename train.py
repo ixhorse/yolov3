@@ -8,6 +8,7 @@ from utils.utils import *
 from utils.dataset_voc import VOCDetection
 
 import torch
+from pprint import pprint
 import pdb
 
 def train(
@@ -95,11 +96,11 @@ def train(
 
         ui = -1
         rloss = defaultdict(float)  # running loss
-        
-        for i, (imgs, targets, _) in enumerate(dataloader):
+
+        for i, (imgs, targets, _, _) in enumerate(dataloader):
             imgs = imgs.to(device)
-            # convert to [imgidx, cls, x, y, w, h] 
-            new_targets = []   
+            # convert to [imgidx, cls, x, y, w, h]
+            new_targets = []
             for idx, target in enumerate(targets):
                 target = target[target[:, 0] == 1]
                 target[:, 0] = idx
@@ -110,8 +111,8 @@ def train(
             # if (epoch == 0) & (i <= n_burnin):
             #     lr = lr0 * (i / n_burnin) ** 4
             #     for g in optimizer.param_groups:
-            #         g['lr'] = lr 
-                       
+            #         g['lr'] = lr
+
             optimizer.zero_grad()
             # Run model
             pred = model(imgs.to(device))
@@ -151,11 +152,12 @@ def train(
                       'optimizer': optimizer.state_dict()}
         if epoch % 5 == 0:
             torch.save(checkpoint, 'weights/epoch_%03d.pt' % epoch)
-        
-        if epoch > 19 and epoch % 10 == 0:
+
+        if epoch > 9 and epoch % 10 == 0:
             with torch.no_grad():
-                P, R, mAP = test.test(cfg, weights='weights/epoch_%03d.pt'%epoch, batch_size=32, img_size=img_size)
-                print(P, R, mAP)
+                APs, mAP = test.test(cfg, weights=None, batch_size=32, img_size=img_size, model=model)
+                pprint(APs)
+                print(mAP)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

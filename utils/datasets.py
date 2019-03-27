@@ -139,13 +139,14 @@ class LoadImagesAndLabels(Dataset):  # for training
         img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB
         img = np.ascontiguousarray(img, dtype=np.float32)
         img = normalize(img)
-        
+
         labels = np.concatenate((np.ones((nL, 1), dtype=np.float32), labels), 1)
         labels = np.vstack((labels, np.zeros((100-nL, 6), dtype=np.float32)))
 
         img = torch.from_numpy(img).float()
         labels = torch.from_numpy(labels).float()
-        return (img, labels, (h,w))
+        shape = np.array([h,w], dtype=np.float32)
+        return (img, labels, shape, self.img_files[index])
 
     def _load_label(self, label_path):
         if os.path.isfile(label_path):
