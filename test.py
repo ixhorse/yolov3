@@ -25,15 +25,16 @@ def test(
 
     if model is None:
         # Initialize model
-        model = Darknet(cfg, img_size)
+        model = Darknet(cfg, img_size).to(device)
 
         # Load weights
         if weights.endswith('.pt'):  # pytorch format
-            model.load_state_dict(torch.load(weights, map_location='cpu')['model'])
+            model.load_state_dict(torch.load(weights, map_location=device)['model'])
         else:  # darknet format
             _ = load_darknet_weights(model, weights)
 
-    model.to(device).eval()
+    if torch.cuda.device_count() > 1:
+        model = nn.DataParallel(model)
 
     # Get dataloader
     vocset = VOCDetection(root=os.path.join('~', 'data', 'VOCdevkit'), splits=((2007, 'test'),),
@@ -48,6 +49,7 @@ def test(
         shutil.rmtree(det_results_path)
     os.makedirs(det_results_path)
 
+    model.eval()
     seen = 0
     for batch_i, (imgs, targets, shapes, img_paths) in enumerate(dataloader):
         t = time.time()

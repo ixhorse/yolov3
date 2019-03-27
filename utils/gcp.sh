@@ -1,54 +1,49 @@
 #!/usr/bin/env bash
 
 # New VM
-sudo rm -rf yolov3 && git clone https://github.com/ultralytics/yolov3
+rm -rf yolov3 weights coco
+git clone https://github.com/ultralytics/yolov3
+bash yolov3/weights/download_yolov3_weights.sh && cp -r weights yolov3
 bash yolov3/data/get_coco_dataset.sh
-sudo rm -rf cocoapi && git clone https://github.com/cocodataset/cocoapi && cd cocoapi/PythonAPI && make && cd ../.. && cp -r cocoapi/PythonAPI/pycocotools yolov3
-sudo shutdown
+git clone https://github.com/cocodataset/cocoapi && cd cocoapi/PythonAPI && make && cd ../.. && cp -r cocoapi/PythonAPI/pycocotools yolov3
+sudo reboot now
 
-# Start
-sudo rm -rf yolov3 && git clone https://github.com/ultralytics/yolov3
+# Re-clone
+sudo rm -rf yolov3
+git clone https://github.com/ultralytics/yolov3  # master
+# git clone -b multi_gpu --depth 1 https://github.com/ultralytics/yolov3  # branch
 cp -r weights yolov3
-cd yolov3 && python3 train.py --batch-size 26
+cp -r cocoapi/PythonAPI/pycocotools yolov3
+cd yolov3
+
+# Train
+python3 train.py
 
 # Resume
 python3 train.py --resume
 
 # Detect
-gsutil cp gs://ultralytics/yolov3.pt yolov3/weights
 python3 detect.py
 
-# Clone branch
-sudo rm -rf yolov3 && git clone -b multi_gpu --depth 1 https://github.com/ultralytics/yolov3
-cd yolov3 && python3 train.py --batch-size 26
-
-sudo rm -rf yolov3 && git clone -b multigpu --depth 1 https://github.com/alexpolichroniadis/yolov3
-cp coco.data yolov3/cfg
-cd yolov3 && python3 train.py --batch-size 26
-
 # Test
-sudo rm -rf yolov3 && git clone https://github.com/ultralytics/yolov3
-sudo rm -rf cocoapi && git clone https://github.com/cocodataset/cocoapi && cd cocoapi/PythonAPI && make && cd ../.. && cp -r cocoapi/PythonAPI/pycocotools yolov3
-cd yolov3 && python3 test.py --save-json --conf-thres 0.005
+python3 detect.py --save-json --conf-thres 0.001 --img-size 416
 
-# Test Darknet
-python3 test.py --img_size 416 --weights ../darknet/backup/yolov3.backup
+# Git pull
+git pull https://github.com/ultralytics/yolov3  # master
+git pull https://github.com/ultralytics/yolov3 multi_gpu  # branch
 
-# Download and Resume
-sudo rm -rf yolov3 && git clone https://github.com/ultralytics/yolov3 && cd yolov3
-wget https://storage.googleapis.com/ultralytics/yolov3.pt -O weights/latest.pt
-python3 train.py --img_size 416 --batch_size 16 --epochs 1 --resume
-python3 test.py --img_size 416 --weights weights/latest.pt --conf_thres 0.5
+# Test Darknet training
+python3 test.py --weights ../darknet/backup/yolov3.backup
 
-# Copy latest.pt to bucket
-gsutil cp yolov3/weights/latest.pt gs://ultralytics
+# Copy latest.pt TO bucket
+gsutil cp yolov3/weights/latest1gpu.pt gs://ultralytics
 
-# Copy latest.pt from bucket
+# Copy latest.pt FROM bucket
 gsutil cp gs://ultralytics/latest.pt yolov3/weights/latest.pt
-wget https://storage.googleapis.com/ultralytics/latest.pt
+wget https://storage.googleapis.com/ultralytics/latest.pt -O weights/latest.pt
 
-# Testing
-sudo rm -rf yolov3 && git clone https://github.com/ultralytics/yolov3 && cd yolov3
-python3 train.py --epochs 3 --var 64
+# Trade Studies
+sudo rm -rf yolov3 && git clone https://github.com/ultralytics/yolov3
+cp -r weights yolov3
+cd yolov3 && python3 train.py --batch-size 16 --epochs 1
 sudo shutdown
-
