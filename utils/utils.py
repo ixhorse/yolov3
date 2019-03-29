@@ -122,7 +122,7 @@ def scale_coords(img_size, coords, img0_shape):
     coords[:, [0, 2]] -= pad_x
     coords[:, [1, 3]] -= pad_y
     coords[:, :4] /= gain
-    coords[:, :4] = torch.clamp(coords[:, :4], min=0)
+    coords[:, :4] = np.clip(coords[:, :4], a_min=0, a_max=None)
     return coords
 
 
@@ -328,7 +328,6 @@ def build_targets(model, targets):
 
     return txy, twh, tcls, indices
 
-
 def non_max_suppression(prediction, conf_thres=0.5, nms_thres=0.4):
     """
     Removes detections with lower object confidence score than 'conf_thres'
@@ -431,6 +430,85 @@ def non_max_suppression(prediction, conf_thres=0.5, nms_thres=0.4):
 
     return output
 
+def iou_calc1(boxes1, boxes2):
+    """
+    :param boxes1: boxes1和boxes2的shape可以不相同，但是需要满足广播机制
+    :param boxes2: 且需要保证最后一维为坐标维，以及坐标的存储结构为(xmin, ymin, xmax, ymax)
+    :return: 返回boxes1和boxes2的IOU，IOU的shape为boxes1和boxes2广播后的shape[:-1]
+    """
+    boxes1 = np.array(boxes1)
+    boxes2 = np.array(boxes2)
+
+    boxes1_area = (boxes1[..., 2] - boxes1[..., 0]) * (boxes1[..., 3] - boxes1[..., 1])
+    boxes2_area = (boxes2[..., 2] - boxes2[..., 0]) * (boxes2[..., 3] - boxes2[..., 1])
+
+    # 计算出boxes1和boxes2相交部分的左上角坐标、右下角坐标
+    left_up = np.maximum(boxes1[..., :2], boxes2[..., :2])
+    right_down = np.minimum(boxes1[..., 2:], boxes2[..., 2:])
+
+    # 计算出boxes1和boxes2相交部分的宽、高
+    # 因为两个boxes没有交集时，(right_down - left_up) < 0，所以maximum可以保证当两个boxes没有交集时，它们之间的iou为0
+    inter_section = np.maximum(right_down - left_up, 0.0)
+    inter_area = inter_section[..., 0] * inter_section[..., 1]
+    union_area = boxes1_area + boxes2_area - inter_area
+    IOU = 1.0 * inter_area / union_area
+    return IOU
+
+def nms(prediction, score_threshold=0.5, iou_threshold=0.4, sigma=0.3, method='nms'):
+    """
+    :param prediction:
+    (x, y, w, h, conf, c*N)
+    :return: best_bboxes
+    假设NMS后剩下N个bbox，那么best_bboxes的shape为(N, 6)，存储格式为(xmin, ymin, xmax, ymax, score, class)
+    其中(xmin, ymin, xmax, ymax)的大小都是相对于输入训练尺寸的，score = conf * prob，class是bbox所属类别的索引号
+    """
+    output = [np.array([]) for _ in range(len(prediction))]
+    for image_i, pred in enumerate(prediction):
+        class_prob, class_pred = torch.max(F.softmax(pred[:, 5:], 1), 1)
+        
+        v = pred[:, 4] > 0.1
+        v = v.nonzero().squeeze()
+        if len(v.shape) == 0:
+            v = v.unsqueeze(0)
+
+        pred = pred[v]
+        class_prob = class_prob[v]
+        class_pred = class_pred[v]
+
+        # From (center x, center y, width, height) to (x1, y1, x2, y2)
+        pred[:, :4] = xywh2xyxy(pred[:, :4])
+        # Detections ordered as (x1, y1, x2, y2, obj_conf * class_prob, class_pred)
+        detections = torch.cat((pred[:, :4], (pred[:, 4]*class_prob.float()).unsqueeze(1), class_pred.float().unsqueeze(1)), 1)
+        detections = detections.cpu().numpy()
+        # Iterate through all predicted classes
+        unique_labels = np.unique(detections[:, -1])
+
+        best_bboxes = []
+        for cls in unique_labels:
+            cls_mask = (detections[:, 5] == cls)
+            cls_bboxes = detections[cls_mask]
+            while len(cls_bboxes) > 0:
+                max_ind = np.argmax(cls_bboxes[:, 4])
+                best_bbox = cls_bboxes[max_ind]
+                best_bboxes.append(best_bbox)
+                cls_bboxes = np.concatenate([cls_bboxes[: max_ind], cls_bboxes[max_ind + 1:]])
+                iou = iou_calc1(best_bbox[np.newaxis, :4], cls_bboxes[:, :4])
+                assert method in ['nms', 'soft-nms']
+                weight = np.ones((len(iou),), dtype=np.float32)
+                if method == 'nms':
+                    iou_mask = iou > iou_threshold
+                    weight[iou_mask] = 0.0
+                if method == 'soft-nms':
+                    weight = np.exp(-(1.0 * iou ** 2 / sigma))
+                cls_bboxes[:, 4] = cls_bboxes[:, 4] * weight
+                score_mask = cls_bboxes[:, 4] > score_threshold
+                cls_bboxes = cls_bboxes[score_mask]
+        if len(best_bboxes) > 0:
+            best_bboxes = np.array(best_bboxes)
+            # Add max detections to outputs
+            output[image_i] = best_bboxes
+
+    return output
 
 def get_yolo_layers(model):
     bool_vec = [x['type'] == 'yolo' for x in model.module_defs]

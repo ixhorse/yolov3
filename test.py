@@ -58,24 +58,22 @@ def test(
         t = time.time()
         output = model(imgs.to(device))
         # nms
-        output = non_max_suppression(output, conf_thres=conf_thres, nms_thres=nms_thres)
+        # output = non_max_suppression(output, conf_thres=conf_thres, nms_thres=nms_thres)
+        output = nms(output, conf_thres, nms_thres, method='nms')
 
         for si, detections in enumerate(output):
             seen += 1
-            if detections is None:
+            if len(detections) == 0:
                 continue
 
-            # remove bbox < conf_thres
-            detections = detections[detections[:, 4] > conf_thres]
             # Rescale boxes from 416 to true image size
             scale_coords(img_size, detections[:, :4], shapes[si]).round()
 
-            detections = detections.cpu().numpy()
             image_ind = os.path.split(img_paths[si])[-1][:-4]
             for bbox in detections:
                 coor = bbox[:4]
-                score = bbox[4] * bbox[5]
-                class_ind = int(bbox[6])
+                score = bbox[4]
+                class_ind = int(bbox[5])
                 class_name = classes[class_ind]
                 score = score = '%.4f' % score
                 xmin, ymin, xmax, ymax = map(str, coor)
