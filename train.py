@@ -112,19 +112,6 @@ def train(
             if nT == 0:  # if no targets continue
                 continue
 
-            # Plot images with bounding boxes
-            plot_images = False
-            if plot_images:
-                from matplotlib import pyplot as plt
-                fig = plt.figure(figsize=(10, 10))
-                for ip in range(batch_size):
-                    labels = xywh2xyxy(targets[targets[:, 0] == ip, 2:6]).numpy() * img_size
-                    plt.subplot(4, 4, ip + 1).imshow(imgs[ip].numpy().transpose(1, 2, 0))
-                    plt.plot(labels[:, [0, 2, 2, 0, 0]].T, labels[:, [1, 1, 3, 3, 1]].T, '.-')
-                    plt.axis('off')
-                fig.tight_layout()
-                fig.savefig('batch_%g.jpg' % i, dpi=fig.dpi)
-
             # SGD burn-in
             if epoch == 0 and i <= n_burnin:
                 lr = lr0 * (i / n_burnin) ** 4

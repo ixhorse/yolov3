@@ -6,6 +6,7 @@ from models import *
 from utils.datasets import *
 from utils.utils import *
 from utils.dataset_voc import VOCDetection
+import pdb
 
 def detect(
         cfg,
@@ -63,26 +64,27 @@ def detect(
             torch.onnx.export(model, img, 'weights/model.onnx', verbose=True)
             return
         pred = model(img)
-        pred = pred[pred[:, :, 4] > conf_thres]  # remove boxes < threshold
+        # pred = pred[pred[:, :, 4] > conf_thres]  # remove boxes < threshold
 
         if len(pred) > 0:
             # Run NMS on predictions
-            detections = non_max_suppression(pred.unsqueeze(0), conf_thres, nms_thres)[0]
+            # detections = non_max_suppression(pred.unsqueeze(0), conf_thres, nms_thres)[0]
+            detections = nms(pred, 0.3, nms_thres)[0]
 
             # Rescale boxes from 416 to true image size
             scale_coords(img_size, detections[:, :4], im0.shape).round()
 
             # Print results to screen
-            unique_classes = detections[:, -1].cpu().unique()
+            unique_classes = np.unique(detections[:, -1])
             for c in unique_classes:
-                n = (detections[:, -1].cpu() == c).sum()
+                n = (detections[:, -1] == c).sum()
                 print('%g %ss' % (n, classes[int(c)]), end=', ')
 
             # Draw bounding boxes and labels of detections
-            for *xyxy, conf, cls_conf, cls in detections:
+            for *xyxy, conf, cls in detections:
                 if save_txt:  # Write to file
                     with open(save_path + '.txt', 'a') as file:
-                        file.write(('%g ' * 6 + '\n') % (*xyxy, cls, cls_conf * conf))
+                        file.write(('%g ' * 6 + '\n') % (*xyxy, cls, conf))
 
                 # Add bbox to the image
                 label = '%s %.2f' % (classes[int(cls)], conf)
