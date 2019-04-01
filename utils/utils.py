@@ -252,22 +252,25 @@ def wh_iou(box1, box2):
 def compute_loss(p, targets):  # predictions, targets
     FT = torch.cuda.FloatTensor if p[0].is_cuda else torch.FloatTensor
     loss, lxy, lwh, lcls, lconf = FT([0]), FT([0]), FT([0]), FT([0]), FT([0])
-    txy, twh, tcls, indices = targets
+    txy, twh, tcls, indices, ignores = targets
     MSE = nn.MSELoss()
     CE = nn.CrossEntropyLoss()
-    BCE = nn.BCEWithLogitsLoss()
+    # BCE = nn.BCEWithLogitsLoss()
 
     # Compute losses
     # gp = [x.numel() for x in tconf]  # grid points
     for i, pi0 in enumerate(p):  # layer i predictions, i
         b, a, gj, gi = indices[i]  # image, anchor, gridx, gridy
+        ignore_b, ignore_anchor, ignore_gj, ignore_gi = ignores[i]
         tconf = torch.zeros_like(pi0[..., 0])  # conf
+        ignore_mask = torch.ones_like(pi0[..., 0])  #ignore
 
         # Compute losses
         k = 1  # nT / bs
         if len(b) > 0:
             pi = pi0[b, a, gj, gi]  # predictions closest to anchors
             tconf[b, a, gj, gi] = 1  # conf
+            ignore_mask[ignore_b, ignore_anchor, ignore_gj, ignore_gi] = 0
 
             lxy += k * MSE(torch.sigmoid(pi[..., 0:2]), txy[i])  # xy
             lwh += k * MSE(pi[..., 2:4], twh[i])  # wh
@@ -275,6 +278,7 @@ def compute_loss(p, targets):  # predictions, targets
 
         # pos_weight = FT([gp[i] / min(gp) * 4.])
         # BCE = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+        BCE = nn.BCEWithLogitsLoss(weight=ignore_mask)
         lconf += (k * 64) * BCE(pi0[..., 4], tconf)
     loss = lxy + lwh + lconf + lcls
 
@@ -292,29 +296,40 @@ def build_targets(model, targets):
     if isinstance(model, nn.parallel.DistributedDataParallel):
         model = model.module
 
-    txy, twh, tcls, indices = [], [], [], []
+    img_index, cls = targets[:, 0:2].long().t() # target image, class
+
+    txy, twh, tcls, indices, ignores = [], [], [], [], []
     for i, layer in enumerate(get_yolo_layers(model)):
         nG = model.module_list[layer][0].nG  # grid size
         anchor_vec = model.module_list[layer][0].anchor_vec
 
+        # scale to grid size
+        label_xy = targets[:, 2:4] * nG
+        label_wh = targets[:, 4:6] * nG
+
         # iou of targets-anchors
-        gwh = targets[:, 4:6] * nG
-        iou = [wh_iou(x, gwh) for x in anchor_vec]
-        iou, a = torch.stack(iou, 0).max(0)  # best iou and anchor
+        iou = torch.stack([wh_iou(x, label_wh) for x in anchor_vec], 0)
+        max_iou, max_anchor = iou.max(0)  # best iou and anchor
 
         # reject below threshold ious (OPTIONAL)
-        reject = True
-        if reject:
-            j = iou > 0.01
-            t, a, gwh = targets[j], a[j], gwh[j]
-        else:
-            t = targets
+        reject_thresh = 0.01
+        j = max_iou > reject_thresh
+        gxy = label_xy[j]
+        gwh = label_wh[j]
+        b, c, a = img_index[j], cls[j], max_anchor[j]
 
         # Indices
-        b, c = t[:, 0:2].long().t()  # target image, class
-        gxy = t[:, 2:4] * nG
         gi, gj = gxy.long().t()  # grid_i, grid_j
         indices.append((b, a, gj, gi))
+
+        # ignore iou > 0.5 but not max
+        mask = ((iou > 0.5) & (iou < max_iou)).nonzero()
+        ignore_anchor, j = mask[:, 0], mask[:, 1]
+        ignore_gxy = label_xy[j]
+        ignore_b = img_index[j]
+        gi, gj = ignore_gxy.long().t()
+        ignores.append((ignore_b, ignore_anchor, gj, gi))
+        
 
         # XY coordinates
         txy.append(gxy - gxy.floor())
@@ -326,7 +341,7 @@ def build_targets(model, targets):
         # Class
         tcls.append(c)
 
-    return txy, twh, tcls, indices
+    return txy, twh, tcls, indices, ignores
 
 def non_max_suppression(prediction, conf_thres=0.5, nms_thres=0.4):
     """
@@ -466,7 +481,7 @@ def nms(prediction, score_threshold=0.5, iou_threshold=0.4, sigma=0.3, method='n
     for image_i, pred in enumerate(prediction):
         class_prob, class_pred = torch.max(F.softmax(pred[:, 5:], 1), 1)
         
-        v = pred[:, 4] > 0.1
+        v = pred[:, 4] > 0.001
         v = v.nonzero().squeeze()
         if len(v.shape) == 0:
             v = v.unsqueeze(0)
