@@ -17,7 +17,7 @@ def test(
         batch_size=16,
         img_size=416,
         iou_thres=0.5,
-        conf_thres=0.3,
+        conf_thres=0.001,
         nms_thres=0.45,
         model=None
 ):
@@ -103,7 +103,7 @@ if __name__ == '__main__':
     parser.add_argument('--cfg', type=str, default='cfg/yolov3-voc.cfg', help='cfg file path')
     parser.add_argument('--weights', type=str, default='weights/yolov3.weights', help='path to weights file')
     parser.add_argument('--iou-thres', type=float, default=0.5, help='iou threshold required to qualify as detected')
-    parser.add_argument('--conf-thres', type=float, default=0.3, help='object confidence threshold')
+    parser.add_argument('--conf-thres', type=float, default=0.001, help='object confidence threshold')
     parser.add_argument('--nms-thres', type=float, default=0.45, help='iou threshold for non-maximum suppression')
     parser.add_argument('--img-size', type=int, default=416, help='size of each image dimension')
     opt = parser.parse_args()

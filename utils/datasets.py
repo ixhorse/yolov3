@@ -11,7 +11,7 @@ import torch
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
-from utils.utils import xyxy2xywh
+from utils.utils import xyxy2xywh, iou_calc1
 
 
 class LoadImages():  # for inference
@@ -117,6 +117,9 @@ class LoadImagesAndLabels(Dataset):  # for training
         if self.mode == 'train':
             # hsv
             img = augment_hsv(img, fraction=0.5)
+            # random crop
+            labels, crop = random_crop_with_constraints(labels, (w, h))
+            img = img[crop[1]:crop[1]+crop[3], crop[0]:crop[0]+crop[2], :].copy()
             # pad and resize
             img, labels = letterbox(img, labels, height=self.height, mode='test')
             # Augment image and labels
@@ -336,8 +339,7 @@ def show_image(img, labels):
 
 def random_color_distort(src, brightness_delta=32, contrast_low=0.5, contrast_high=1.5,
                          saturation_low=0.5, saturation_high=1.5, hue_delta=18):
-    """
-    gluoncv/data/transforms/experimental/image.py
+    """gluoncv/data/transforms/experimental/image.py
     Randomly distort image color space.
     Note that input image should in original range [0, 255].
     Parameters
@@ -424,3 +426,156 @@ def random_color_distort(src, brightness_delta=32, contrast_low=0.5, contrast_hi
         src = contrast(src, contrast_low, contrast_high)
     # return np.clip(src, 0, 255).astype(np.uint8)
     return src
+
+def bbox_crop(labels, crop_box=None, allow_outside_center=True):
+    """gluoncv code
+    Crop bounding boxes according to slice area.
+    This method is mainly used with image cropping to ensure bonding boxes fit
+    within the cropped image.
+    Parameters
+    ----------
+    bbox : numpy.ndarray
+        Numpy.ndarray with shape (N, 4+) where N is the number of bounding boxes.
+        The second axis represents attributes of the bounding box.
+        Specifically, these are :math:`(x_{min}, y_{min}, x_{max}, y_{max})`,
+        we allow additional attributes other than coordinates, which stay intact
+        during bounding box transformations.
+    crop_box : tuple
+        Tuple of length 4. :math:`(x_{min}, y_{min}, width, height)`
+    allow_outside_center : bool
+        If `False`, remove bounding boxes which have centers outside cropping area.
+    Returns
+    -------
+    numpy.ndarray
+        Cropped bounding boxes with shape (M, 4+) where M <= N.
+    """
+    bbox = labels[:, 1:].copy()
+    if crop_box is None:
+        return labels
+    if not len(crop_box) == 4:
+        raise ValueError(
+            "Invalid crop_box parameter, requires length 4, given {}".format(str(crop_box)))
+    if sum([int(c is None) for c in crop_box]) == 4:
+        return labels
+
+    l, t, w, h = crop_box
+
+    left = l if l else 0
+    top = t if t else 0
+    right = left + (w if w else np.inf)
+    bottom = top + (h if h else np.inf)
+    crop_bbox = np.array((left, top, right, bottom))
+
+    if allow_outside_center:
+        mask = np.ones(bbox.shape[0], dtype=bool)
+    else:
+        centers = (bbox[:, :2] + bbox[:, 2:4]) / 2
+        mask = np.logical_and(crop_bbox[:2] <= centers, centers < crop_bbox[2:]).all(axis=1)
+
+    # transform borders
+    bbox[:, :2] = np.maximum(bbox[:, :2], crop_bbox[:2])
+    bbox[:, 2:4] = np.minimum(bbox[:, 2:4], crop_bbox[2:4])
+    bbox[:, :2] -= crop_bbox[:2]
+    bbox[:, 2:4] -= crop_bbox[:2]
+
+    mask = np.logical_and(mask, (bbox[:, :2] < bbox[:, 2:4]).all(axis=1))
+    labels = labels[mask]
+    labels[:, 1:] = bbox[mask]
+    return labels
+
+def random_crop_with_constraints(bbox, size, min_scale=0.3, max_scale=1,
+                                 max_aspect_ratio=2, constraints=None,
+                                 max_trial=50):
+    """gluoncv code
+    Crop an image randomly with bounding box constraints.
+    This data augmentation is used in training of
+    Single Shot Multibox Detector [#]_. More details can be found in
+    data augmentation section of the original paper.
+    .. [#] Wei Liu, Dragomir Anguelov, Dumitru Erhan, Christian Szegedy,
+       Scott Reed, Cheng-Yang Fu, Alexander C. Berg.
+       SSD: Single Shot MultiBox Detector. ECCV 2016.
+    Parameters
+    ----------
+    bbox : numpy.ndarray
+        Numpy.ndarray with shape (N, 4+) where N is the number of bounding boxes.
+        The second axis represents attributes of the bounding box.
+        Specifically, these are :math:`(x_{min}, y_{min}, x_{max}, y_{max})`,
+        we allow additional attributes other than coordinates, which stay intact
+        during bounding box transformations.
+    size : tuple
+        Tuple of length 2 of image shape as (width, height).
+    min_scale : float
+        The minimum ratio between a cropped region and the original image.
+        The default value is :obj:`0.3`.
+    max_scale : float
+        The maximum ratio between a cropped region and the original image.
+        The default value is :obj:`1`.
+    max_aspect_ratio : float
+        The maximum aspect ratio of cropped region.
+        The default value is :obj:`2`.
+    constraints : iterable of tuples
+        An iterable of constraints.
+        Each constraint should be :obj:`(min_iou, max_iou)` format.
+        If means no constraint if set :obj:`min_iou` or :obj:`max_iou` to :obj:`None`.
+        If this argument defaults to :obj:`None`, :obj:`((0.1, None), (0.3, None),
+        (0.5, None), (0.7, None), (0.9, None), (None, 1))` will be used.
+    max_trial : int
+        Maximum number of trials for each constraint before exit no matter what.
+    Returns
+    -------
+    numpy.ndarray
+        Cropped bounding boxes with shape :obj:`(M, 4+)` where M <= N.
+    tuple
+        Tuple of length 4 as (x_offset, y_offset, new_width, new_height).
+    """
+    # default params in paper
+    if constraints is None:
+        constraints = (
+            (0.1, None),
+            (0.3, None),
+            (0.5, None),
+            (0.7, None),
+            (0.9, None),
+            (None, 1),
+        )
+
+    w, h = size
+
+    candidates = [(0, 0, w, h)]
+    for min_iou, max_iou in constraints:
+        min_iou = -np.inf if min_iou is None else min_iou
+        max_iou = np.inf if max_iou is None else max_iou
+
+        for _ in range(max_trial):
+            scale = random.uniform(min_scale, max_scale)
+            aspect_ratio = random.uniform(
+                max(1 / max_aspect_ratio, scale * scale),
+                min(max_aspect_ratio, 1 / (scale * scale)))
+            crop_h = int(h * scale / np.sqrt(aspect_ratio))
+            crop_w = int(w * scale * np.sqrt(aspect_ratio))
+
+            crop_t = random.randrange(h - crop_h)
+            crop_l = random.randrange(w - crop_w)
+            crop_bb = np.array((crop_l, crop_t, crop_l + crop_w, crop_t + crop_h))
+
+            if len(bbox) == 0:
+                top, bottom = crop_t, crop_t + crop_h
+                left, right = crop_l, crop_l + crop_w
+                return bbox, (left, top, right-left, bottom-top)
+
+            iou = iou_calc1(bbox[:, 1:], crop_bb[np.newaxis])
+            if min_iou <= iou.min() and iou.max() <= max_iou:
+                top, bottom = crop_t, crop_t + crop_h
+                left, right = crop_l, crop_l + crop_w
+                candidates.append((left, top, right-left, bottom-top))
+                break
+
+    # random select one
+    while candidates:
+        crop = candidates.pop(np.random.randint(0, len(candidates)))
+        new_bbox = bbox_crop(bbox, crop, allow_outside_center=False)
+        if new_bbox.size < 1:
+            continue
+        new_crop = (crop[0], crop[1], crop[2], crop[3])
+        return new_bbox, new_crop
+    return bbox, (0, 0, w, h)
