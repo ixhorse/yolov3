@@ -62,7 +62,8 @@ def train(
     #     p.requires_grad = True if (p.shape[0] == 255) else False
 
     # Set scheduler
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[60], gamma=0.1, last_epoch=start_epoch - 1)
+    # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[60], gamma=0.1, last_epoch=start_epoch - 1)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=lr0, eta_min=1e-5, last_epoch=start_epoch - 1)
 
     # Dataset
     train_dataset = VOCDetection(root=os.path.join('~', 'data', 'VOCdevkit'), img_size=img_size, mode='train')
