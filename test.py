@@ -18,12 +18,12 @@ def test(
         img_size=416,
         iou_thres=0.5,
         conf_thres=0.001,
-        nms_thres=0.45,
+        nms_thres=0.5,
         model=None
 ):
-    device = torch_utils.select_device()
-
     if model is None:
+        device = torch_utils.select_device()
+
         # Initialize model
         model = Darknet(cfg, img_size).to(device)
 
@@ -33,8 +33,10 @@ def test(
         else:  # darknet format
             _ = load_darknet_weights(model, weights)
 
-    if torch.cuda.device_count() > 1:
-        model = nn.DataParallel(model)
+        if torch.cuda.device_count() > 1:
+            model = nn.DataParallel(model)
+    else:
+        device = next(model.parameters()).device  # get model device
 
     # Get dataloader
     vocset = VOCDetection(root=os.path.join('~', 'data', 'VOCdevkit'), splits=((2007, 'test'),),
@@ -56,7 +58,7 @@ def test(
     seen = 0
     for batch_i, (imgs, targets, shapes, img_paths) in enumerate(dataloader):
         t = time.time()
-        output = model(imgs.to(device))
+        output, _ = model(imgs.to(device))
         # nms
         # output = non_max_suppression(output, conf_thres=conf_thres, nms_thres=nms_thres)
         output = nms(output, conf_thres, nms_thres, method='nms')
@@ -104,7 +106,7 @@ if __name__ == '__main__':
     parser.add_argument('--weights', type=str, default='weights/yolov3.weights', help='path to weights file')
     parser.add_argument('--iou-thres', type=float, default=0.5, help='iou threshold required to qualify as detected')
     parser.add_argument('--conf-thres', type=float, default=0.001, help='object confidence threshold')
-    parser.add_argument('--nms-thres', type=float, default=0.45, help='iou threshold for non-maximum suppression')
+    parser.add_argument('--nms-thres', type=float, default=0.5, help='iou threshold for non-maximum suppression')
     parser.add_argument('--img-size', type=int, default=416, help='size of each image dimension')
     opt = parser.parse_args()
     print(opt, end='\n\n')
