@@ -16,31 +16,62 @@ from utils.utils import xyxy2xywh, iou_calc1
 
 class LoadImages():  # for inference
     def __init__(self, path, img_size=416):
-        if os.path.isdir(path):
-            image_format = ['.jpg', '.jpeg', '.png', '.tif']
-            self.files = sorted(glob.glob('%s/*.*' % path))
-            self.files = list(filter(lambda x: os.path.splitext(x)[1].lower() in image_format, self.files))
-        elif os.path.isfile(path):
-            self.files = [path]
-
-        self.nF = len(self.files)  # number of image files
         self.height = img_size
+        img_formats = ['.jpg', '.jpeg', '.png', '.tif']
+        vid_formats = ['.mov', '.avi', '.mp4']
 
-        assert self.nF > 0, 'No images found in ' + path
+        files = []
+        if os.path.isdir(path):
+            files = sorted(glob.glob('%s/*.*' % path))
+        elif os.path.isfile(path):
+            files = [path]
+
+        images = [x for x in files if os.path.splitext(x)[-1].lower() in img_formats]
+        videos = [x for x in files if os.path.splitext(x)[-1].lower() in vid_formats]
+        nI, nV = len(images), len(videos)
+
+        self.files = images + videos
+        self.nF = nI + nV  # number of files
+        self.video_flag = [False] * nI + [True] * nV
+        self.mode = 'images'
+        if any(videos):
+            self.new_video(videos[0])  # new video
+        else:
+            self.cap = None
+        assert self.nF > 0, 'No images or videos found in ' + path
 
     def __iter__(self):
-        self.count = -1
+        self.count = 0
         return self
 
     def __next__(self):
-        self.count += 1
         if self.count == self.nF:
             raise StopIteration
-        img_path = self.files[self.count]
+        path = self.files[self.count]
 
-        # Read image
-        img0 = cv2.imread(img_path)  # BGR
-        assert img0 is not None, 'File Not Found ' + img_path
+        if self.video_flag[self.count]:
+            # Read video
+            self.mode = 'video'
+            ret_val, img0 = self.cap.read()
+            if not ret_val:
+                self.count += 1
+                self.cap.release()
+                if self.count == self.nF:  # last video
+                    raise StopIteration
+                else:
+                    path = self.files[self.count]
+                    self.new_video(path)
+                    ret_val, img0 = self.cap.read()
+
+            self.frame += 1
+            print('video %g/%g (%g/%g) %s: ' % (self.count + 1, self.nF, self.frame, self.nframes, path), end='')
+
+        else:
+            # Read image
+            self.count += 1
+            img0 = cv2.imread(path)  # BGR
+            assert img0 is not None, 'File Not Found ' + path
+            print('image %g/%g %s: ' % (self.count, self.nF, path), end='')
 
         # Padded resize
         img, _, = letterbox(img0, None, height=self.height, mode='test')
@@ -50,8 +81,13 @@ class LoadImages():  # for inference
         img = np.ascontiguousarray(img, dtype=np.float32)
         img = normalize(img)
 
-        # cv2.imwrite(img_path + '.letterbox.jpg', 255 * img.transpose((1, 2, 0))[:, :, ::-1])  # save letterbox image
-        return img_path, img, img0
+        # cv2.imwrite(path + '.letterbox.jpg', 255 * img.transpose((1, 2, 0))[:, :, ::-1])  # save letterbox image
+        return path, img, img0, self.cap
+
+    def new_video(self, path):
+        self.frame = 0
+        self.cap = cv2.VideoCapture(path)
+        self.nframes = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
     def __len__(self):
         return self.nF  # number of files
@@ -101,13 +137,11 @@ class LoadImagesAndLabels(Dataset):  # for training
         self.nF = len(self.img_files)  # number of image files
         self.height = img_size
         self.mode = mode
-        self.shuffled_vector = np.random.permutation(self.nF)
 
         assert self.nF > 0, 'No images found in %s' % path
 
     def __getitem__(self, index):
         assert index <= len(self), 'index range error'
-        index = self.shuffled_vector[index]
         # read img and label
         img = cv2.imread(self.img_files[index])  # BGR
         assert img is not None, 'File Not Found ' + self.img_files[index]
@@ -121,7 +155,7 @@ class LoadImagesAndLabels(Dataset):  # for training
             labels, crop = random_crop_with_constraints(labels, (w, h))
             img = img[crop[1]:crop[1]+crop[3], crop[0]:crop[0]+crop[2], :].copy()
             # pad and resize
-            img, labels = letterbox(img, labels, height=self.height, mode='test')
+            img, labels = letterbox(img, labels, height=self.height, mode=self.mode)
             # Augment image and labels
             img, labels = random_affine(img, labels, degrees=(-5, 5), translate=(0.10, 0.10), scale=(0.90, 1.10))
             # random left-right flip
@@ -274,7 +308,7 @@ def random_affine(img, targets=(), degrees=(-10, 10), translate=(.1, .1), scale=
         y = xy[:, [1, 3, 5, 7]]
         xy = np.concatenate((x.min(1), y.min(1), x.max(1), y.max(1))).reshape(4, n).T
 
-        # apply angle-based reduction
+        # apply angle-based reduction of bounding boxes
         radians = a * math.pi / 180
         reduction = max(abs(math.sin(radians)), abs(math.cos(radians))) ** 0.5
         x = (xy[:, 2] + xy[:, 0]) / 2

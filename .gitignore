@@ -8,16 +8,27 @@
 *.PNG
 *.TIF
 *.HEIC
+*.mp4
+*.mov
+*.MOV
+*.avi
 *.data
+*.json
+
 *.cfg
-data/*
-!cfg/coco.data
 !cfg/yolov3*.cfg
+
+data/*
 !data/samples/zidane.jpg
 !data/coco.names
 !data/coco_paper.names
+!data/coco.data
+!data/coco_1*.data
+!data/coco_1*.txt
 
+pycocotools/*
 results*.txt
+gcp_test*.sh
 
 eval/*
 !eval/*.py

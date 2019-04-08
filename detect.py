@@ -14,8 +14,8 @@ def detect(
         images,
         output='output',  # output folder
         img_size=416,
-        conf_thres=0.3,
-        nms_thres=0.45,
+        conf_thres=0.5,
+        nms_thres=0.5,
         save_txt=False,
         save_images=True,
         webcam=False
@@ -30,9 +30,6 @@ def detect(
 
     # Load weights
     if weights.endswith('.pt'):  # pytorch format
-        if weights.endswith('yolov3.pt') and not os.path.exists(weights):
-            if platform in ('darwin', 'linux'):  # linux/macos
-                os.system('wget https://storage.googleapis.com/ultralytics/yolov3.pt -O ' + weights)
         model.load_state_dict(torch.load(weights, map_location=device)['model'])
     else:  # darknet format
         _ = load_darknet_weights(model, weights)
@@ -40,6 +37,7 @@ def detect(
     model.to(device).eval()
 
     # Set Dataloader
+    vid_path, vid_writer = None, None
     if webcam:
         save_images = False
         dataloader = LoadWebcam(img_size=img_size)
@@ -50,33 +48,25 @@ def detect(
     classes = VOCDetection.CLASSES
     colors = [[random.randint(0, 255) for _ in range(3)] for _ in range(len(classes))]
 
-    for i, (path, img, im0) in enumerate(dataloader):
+    for i, (path, img, im0, vid_cap) in enumerate(dataloader):
         t = time.time()
         save_path = str(Path(output) / Path(path).name)
-        if webcam:
-            print('webcam frame %g: ' % (i + 1), end='')
-        else:
-            print('image %g/%g %s: ' % (i + 1, len(dataloader), path), end='')
 
         # Get detections
         img = torch.from_numpy(img).unsqueeze(0).to(device)
         if ONNX_EXPORT:
             torch.onnx.export(model, img, 'weights/model.onnx', verbose=True)
             return
-        pred = model(img)
-        # pred = pred[pred[:, :, 4] > conf_thres]  # remove boxes < threshold
+        pred, _ = model(img)
+        # detections = non_max_suppression(pred, conf_thres, nms_thres)[0]
+        detections = nms(pred, conf_thres, nms_thres, method='nms')[0]
 
-        if len(pred) > 0:
-            # Run NMS on predictions
-            # detections = non_max_suppression(pred.unsqueeze(0), conf_thres, nms_thres)[0]
-            detections = nms(pred, 0.3, nms_thres)[0]
-
+        if detections is not None and len(detections) > 0:
             # Rescale boxes from 416 to true image size
             scale_coords(img_size, detections[:, :4], im0.shape).round()
 
             # Print results to screen
-            unique_classes = np.unique(detections[:, -1])
-            for c in unique_classes:
+            for c in np.unique(detections[:, -1]):
                 n = (detections[:, -1] == c).sum()
                 print('%g %ss' % (n, classes[int(c)]), end=', ')
 
@@ -92,11 +82,23 @@ def detect(
 
         print('Done. (%.3fs)' % (time.time() - t))
 
-        if save_images:  # Save generated image with detections
-            cv2.imwrite(save_path, im0)
-
         if webcam:  # Show live webcam
             cv2.imshow(weights, im0)
+
+        if save_images:  # Save generated image with detections
+            if dataloader.mode == 'video':
+                if vid_path != save_path:  # new video
+                    vid_path = save_path
+                    if isinstance(vid_writer, cv2.VideoWriter):
+                        vid_writer.release()  # release previous video writer
+                    width = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    height = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    fps = vid_cap.get(cv2.CAP_PROP_FPS)
+                    vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*'avc1'), fps, (width, height))
+                vid_writer.write(im0)
+
+            else:
+                cv2.imwrite(save_path, im0)
 
     if save_images and platform == 'darwin':  # macos
         os.system('open ' + output + ' ' + save_path)
@@ -107,9 +109,9 @@ if __name__ == '__main__':
     parser.add_argument('--cfg', type=str, default='cfg/yolov3-voc.cfg', help='cfg file path')
     parser.add_argument('--weights', type=str, default='weights/yolov3.weights', help='path to weights file')
     parser.add_argument('--images', type=str, default='data/samples', help='path to images')
-    parser.add_argument('--img-size', type=int, default=32 * 13, help='size of each image dimension')
-    parser.add_argument('--conf-thres', type=float, default=0.50, help='object confidence threshold')
-    parser.add_argument('--nms-thres', type=float, default=0.45, help='iou threshold for non-maximum suppression')
+    parser.add_argument('--img-size', type=int, default=416, help='size of each image dimension')
+    parser.add_argument('--conf-thres', type=float, default=0.5, help='object confidence threshold')
+    parser.add_argument('--nms-thres', type=float, default=0.5, help='iou threshold for non-maximum suppression')
     opt = parser.parse_args()
     print(opt)
 
