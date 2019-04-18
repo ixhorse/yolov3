@@ -326,9 +326,9 @@ def build_targets(model, targets):
         # reject below threshold ious (OPTIONAL)
         reject_thresh = 0.10
         j = max_iou > reject_thresh
-        gxy = label_xy[j].clone()
-        gwh = label_wh[j].clone()
-        b, c, a = img_index[j].clone(), cls[j], max_anchor[j]
+        gxy = label_xy[j]
+        gwh = label_wh[j]
+        b, c, a = img_index[j], cls[j], max_anchor[j]
 
         # Indices
         gi, gj = gxy.long().t()  # grid_i, grid_j
@@ -337,8 +337,8 @@ def build_targets(model, targets):
         # ignore iou > 0.5 but not max
         mask = ((iou > 0.5) & (iou < max_iou)).nonzero()
         ignore_anchor, j = mask[:, 0], mask[:, 1]
-        ignore_gxy = label_xy[j].clone()
-        ignore_b = img_index[j].clone()
+        ignore_gxy = label_xy[j]
+        ignore_b = img_index[j]
         gi, gj = ignore_gxy.long().t()
         ignores.append((ignore_b, ignore_anchor, gj, gi))
         

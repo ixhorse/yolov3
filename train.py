@@ -185,7 +185,7 @@ if __name__ == '__main__':
     parser.add_argument('--img-size', type=int, default=416, help='pixels')
     parser.add_argument('--resume', action='store_true', help='resume training flag')
     parser.add_argument('--transfer', action='store_true', help='transfer learning flag')
-    parser.add_argument('--num-workers', type=int, default=8, help='number of Pytorch DataLoader workers')
+    parser.add_argument('--num-workers', type=int, default=4, help='number of Pytorch DataLoader workers')
     opt = parser.parse_args()
     print(opt, end='\n\n')
 

@@ -102,7 +102,6 @@ class YOLOLayer(nn.Module):
     def __init__(self, anchors, nC, img_size, yolo_layer, cfg):
         super(YOLOLayer, self).__init__()
 
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.nC = nC  # number of classes (80)
         self.nA = len(anchors)  # number of anchors (3)
         self.register_buffer('anchors', torch.FloatTensor(anchors))
