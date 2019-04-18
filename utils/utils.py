@@ -264,13 +264,15 @@ def compute_loss(p, targets):  # predictions, targets
     txy, twh, tcls, indices, ignores = targets
     MSE = nn.MSELoss()
     CE = nn.CrossEntropyLoss()
-    # BCE = nn.BCEWithLogitsLoss()
+    SML1 = nn.SmoothL1Loss()
+    # BCE = nn.BCELoss()
 
     # Compute losses
     # gp = [x.numel() for x in tconf]  # grid points
     for i, pi0 in enumerate(p):  # layer i predictions, i
         b, a, gj, gi = indices[i]  # image, anchor, gridx, gridy
         ignore_b, ignore_anchor, ignore_gj, ignore_gi = ignores[i]
+        
         tconf = torch.zeros_like(pi0[..., 0])  # conf
         ignore_mask = torch.ones_like(pi0[..., 0])  #ignore
 
@@ -282,7 +284,7 @@ def compute_loss(p, targets):  # predictions, targets
             ignore_mask[ignore_b, ignore_anchor, ignore_gj, ignore_gi] = 0
 
             lxy += (k * 8) * MSE(torch.sigmoid(pi[..., 0:2]), txy[i])  # xy loss
-            lwh += (k * 4) * MSE(torch.sigmoid(pi[..., 2:4]), twh[i])  # wh yolo loss
+            lwh += (k * 4) * MSE(pi[..., 2:4], twh[i])  # wh yolo loss
             # lwh += (k * 4) * MSE(torch.sigmoid(pi[..., 2:4]), twh[i])  # wh power loss
             lcls += (k * 1) * CE(pi[..., 5:], tcls[i])  # class_conf loss
 
@@ -303,7 +305,7 @@ def compute_loss(p, targets):  # predictions, targets
 
 def build_targets(model, targets):
     # targets = [image, class, x, y, w, h]
-    if isinstance(model, nn.parallel.DistributedDataParallel):
+    if isinstance(model, nn.parallel.DataParallel):
         model = model.module
 
     img_index, cls = targets[:, :2].long().t() # target image, class
@@ -311,21 +313,22 @@ def build_targets(model, targets):
     txy, twh, tcls, indices, ignores = [], [], [], [], []
     for i, layer in enumerate(get_yolo_layers(model)):
         layer = model.module_list[layer][0]
+        _, _, anchor_vec, _ = layer.create_grids(layer.nG.device)
 
         # scale to grid size
         label_xy = targets[:, 2:4] * layer.nG
         label_wh = targets[:, 4:6] * layer.nG
 
         # iou of targets-anchors
-        iou = torch.stack([wh_iou(x, label_wh) for x in layer.anchor_vec], 0)
+        iou = torch.stack([wh_iou(x, label_wh) for x in anchor_vec], 0)
         max_iou, max_anchor = iou.max(0)  # best iou and anchor
 
         # reject below threshold ious (OPTIONAL)
         reject_thresh = 0.10
         j = max_iou > reject_thresh
-        gxy = label_xy[j]
-        gwh = label_wh[j]
-        b, c, a = img_index[j], cls[j], max_anchor[j]
+        gxy = label_xy[j].clone()
+        gwh = label_wh[j].clone()
+        b, c, a = img_index[j].clone(), cls[j], max_anchor[j]
 
         # Indices
         gi, gj = gxy.long().t()  # grid_i, grid_j
@@ -334,17 +337,16 @@ def build_targets(model, targets):
         # ignore iou > 0.5 but not max
         mask = ((iou > 0.5) & (iou < max_iou)).nonzero()
         ignore_anchor, j = mask[:, 0], mask[:, 1]
-        ignore_gxy = label_xy[j]
-        ignore_b = img_index[j]
+        ignore_gxy = label_xy[j].clone()
+        ignore_b = img_index[j].clone()
         gi, gj = ignore_gxy.long().t()
         ignores.append((ignore_b, ignore_anchor, gj, gi))
         
-
         # XY coordinates
         txy.append(gxy - gxy.floor())
 
         # Width and height
-        twh.append(torch.log(gwh / layer.anchor_vec[a]))  # yolo method
+        twh.append(torch.log(gwh / anchor_vec[a]))  # yolo method
         # twh.append((gwh / layer.anchor_vec[a]) ** (1 / 3) / 2)  # power method
 
         # Class
@@ -469,7 +471,7 @@ def iou_calc1(boxes1, boxes2):
     # 因为两个boxes没有交集时，(right_down - left_up) < 0，所以maximum可以保证当两个boxes没有交集时，它们之间的iou为0
     inter_section = np.maximum(right_down - left_up, 0.0)
     inter_area = inter_section[..., 0] * inter_section[..., 1]
-    union_area = boxes1_area + boxes2_area - inter_area
+    union_area = boxes1_area + 1e-16 + boxes2_area - inter_area
     IOU = 1.0 * inter_area / union_area
     return IOU
 

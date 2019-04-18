@@ -2,6 +2,7 @@ import argparse
 import json
 import time
 import shutil
+from tqdm import tqdm
 from pathlib import Path
 
 from models import *
@@ -43,7 +44,7 @@ def test(
                         img_size=img_size, mode='test')
     dataloader = torch.utils.data.DataLoader(vocset, 
                                             batch_size=batch_size, 
-                                            num_workers=16,
+                                            num_workers=8,
                                             collate_fn=vocset.collate_fn)
 
     nC = vocset.num_class #num class
@@ -56,6 +57,7 @@ def test(
 
     model.eval()
     seen = 0
+    pbar = tqdm(total=len(dataloader) * batch_size, desc='Computing mAP')
     for batch_i, (imgs, targets, shapes, img_paths) in enumerate(dataloader):
         t = time.time()
         output, _ = model(imgs.to(device))
@@ -82,8 +84,9 @@ def test(
                 bbox_mess = ' '.join([image_ind, score, xmin, ymin, xmax, ymax]) + '\n'
                 with open(os.path.join(det_results_path, 'comp3_det_test_' + class_name + '.txt'), 'a') as f:
                     f.write(bbox_mess)
-
-        print(('%11s%11s' + '%11.3g') % (seen, vocset.nF, time.time() - t))
+        
+        pbar.update(batch_size)
+    pbar.close()
 
     filename = os.path.join('eval', 'results', 'VOC2007', 'Main', 'comp3_det_test_{:s}.txt')
     cachedir = os.path.join('eval', 'cache')
