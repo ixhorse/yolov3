@@ -122,7 +122,7 @@ class LoadWebcam:  # for inference
         img = np.ascontiguousarray(img, dtype=np.float32)
         img = normalize(img)
 
-        return img_path, img, img0
+        return img_path, img, img0, None
 
     def __len__(self):
         return 0
@@ -150,7 +150,7 @@ class LoadImagesAndLabels(Dataset):  # for training
         labels = self._load_label(self.label_files[index])
         if self.mode == 'train':
             # hsv
-            img = augment_hsv(img, fraction=0.5)
+            # img = augment_hsv(img, fraction=0.5)
             # random crop
             labels, crop = random_crop_with_constraints(labels, (w, h))
             img = img[crop[1]:crop[1]+crop[3], crop[0]:crop[0]+crop[2], :].copy()
@@ -161,7 +161,7 @@ class LoadImagesAndLabels(Dataset):  # for training
             # random left-right flip
             img, labels = random_flip(img, labels, 0.5)
             # color distort
-            # img = random_color_distort(img)
+            img = random_color_distort(img)
         else:
             # pad and resize
             img, labels = letterbox(img, labels, height=self.height, mode=self.mode)

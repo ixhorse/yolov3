@@ -161,8 +161,7 @@ def train(
         # Save latest checkpoint
         checkpoint = {'epoch': epoch,
                     'best_loss': best_loss,
-                    'model': model.module.state_dict() if type(
-                        model) is nn.parallel.DataParallel else model.state_dict(),
+                    'model': model.module.state_dict() if type(model) is nn.parallel.DataParallel else model.state_dict(),
                     'optimizer': optimizer.state_dict()}
         if epoch % 5 == 0:
             torch.save(checkpoint, 'weights/epoch_%03d.pt' % epoch)

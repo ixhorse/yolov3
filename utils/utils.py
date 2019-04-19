@@ -311,8 +311,8 @@ def build_targets(model, targets):
     img_index, cls = targets[:, :2].long().t() # target image, class
 
     txy, twh, tcls, indices, ignores = [], [], [], [], []
-    for i, layer in enumerate(get_yolo_layers(model)):
-        layer = model.module_list[layer][0]
+    for i in model.yolo_layers:
+        layer = model.module_list[i][0]
         _, _, anchor_vec, _ = layer.create_grids(layer.nG.device)
 
         # scale to grid size
@@ -530,10 +530,6 @@ def nms(prediction, score_threshold=0.5, iou_threshold=0.4, sigma=0.3, method='n
             output[image_i] = best_bboxes
 
     return output
-
-def get_yolo_layers(model):
-    bool_vec = [x['type'] == 'yolo' for x in model.module_defs]
-    return [i for i, x in enumerate(bool_vec) if x]  # [82, 94, 106] for yolov3
 
 
 def strip_optimizer_from_checkpoint(filename='weights/best.pt'):
