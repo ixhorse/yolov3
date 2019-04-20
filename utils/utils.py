@@ -262,15 +262,19 @@ def compute_loss(p, targets):  # predictions, targets
     FT = torch.cuda.FloatTensor if p[0].is_cuda else torch.FloatTensor
     lxy, lwh, lcls, lconf = FT([0]), FT([0]), FT([0]), FT([0])
     txy, twh, tcls, indices, ignores = targets
-    MSE = nn.MSELoss()
-    CE = nn.CrossEntropyLoss()
-    # BCE = nn.BCEWithLogitsLoss()
+
+    device = p[0].device
+    MSE = nn.MSELoss().to(device)
+    CE = nn.CrossEntropyLoss().to(device)
+    SML1 = nn.SmoothL1Loss().to(device)
+    xBCE = nn.BCEWithLogitsLoss().to(device)
 
     # Compute losses
     # gp = [x.numel() for x in tconf]  # grid points
     for i, pi0 in enumerate(p):  # layer i predictions, i
         b, a, gj, gi = indices[i]  # image, anchor, gridx, gridy
         ignore_b, ignore_anchor, ignore_gj, ignore_gi = ignores[i]
+        
         tconf = torch.zeros_like(pi0[..., 0])  # conf
         ignore_mask = torch.ones_like(pi0[..., 0])  #ignore
 
@@ -281,14 +285,13 @@ def compute_loss(p, targets):  # predictions, targets
             tconf[b, a, gj, gi] = 1  # conf
             ignore_mask[ignore_b, ignore_anchor, ignore_gj, ignore_gi] = 0
 
-            lxy += (k * 8) * MSE(torch.sigmoid(pi[..., 0:2]), txy[i])  # xy loss
-            lwh += (k * 4) * MSE(torch.sigmoid(pi[..., 2:4]), twh[i])  # wh yolo loss
-            # lwh += (k * 4) * MSE(torch.sigmoid(pi[..., 2:4]), twh[i])  # wh power loss
+            lxy += (k * 8) * MSE(torch.sigmoid(pi[..., 0:2)], txy[i])  # xy loss  
+            lwh += (k * 4) * SML1(pi[..., 2:4], twh[i])  # wh yolo loss
             lcls += (k * 1) * CE(pi[..., 5:], tcls[i])  # class_conf loss
 
         # pos_weight = FT([gp[i] / min(gp) * 4.])
         # BCE = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-        BCE = nn.BCEWithLogitsLoss(weight=ignore_mask)
+        BCE = nn.BCEWithLogitsLoss(weight=ignore_mask).to(device)
         lconf += (k * 64) * BCE(pi0[..., 4], tconf)
     loss = lxy + lwh + lconf + lcls
 
@@ -303,21 +306,22 @@ def compute_loss(p, targets):  # predictions, targets
 
 def build_targets(model, targets):
     # targets = [image, class, x, y, w, h]
-    if isinstance(model, nn.parallel.DistributedDataParallel):
+    if isinstance(model, nn.parallel.DataParallel):
         model = model.module
 
     img_index, cls = targets[:, :2].long().t() # target image, class
 
     txy, twh, tcls, indices, ignores = [], [], [], [], []
-    for i, layer in enumerate(get_yolo_layers(model)):
-        layer = model.module_list[layer][0]
+    for i in model.yolo_layers:
+        layer = model.module_list[i][0]
+        _, _, anchor_vec, _ = layer.create_grids(layer.nG.device)
 
         # scale to grid size
         label_xy = targets[:, 2:4] * layer.nG
         label_wh = targets[:, 4:6] * layer.nG
 
         # iou of targets-anchors
-        iou = torch.stack([wh_iou(x, label_wh) for x in layer.anchor_vec], 0)
+        iou = torch.stack([wh_iou(x, label_wh) for x in anchor_vec], 0)
         max_iou, max_anchor = iou.max(0)  # best iou and anchor
 
         # reject below threshold ious (OPTIONAL)
@@ -339,12 +343,11 @@ def build_targets(model, targets):
         gi, gj = ignore_gxy.long().t()
         ignores.append((ignore_b, ignore_anchor, gj, gi))
         
-
         # XY coordinates
         txy.append(gxy - gxy.floor())
 
         # Width and height
-        twh.append(torch.log(gwh / layer.anchor_vec[a]))  # yolo method
+        twh.append(torch.log(gwh / anchor_vec[a]))  # yolo method
         # twh.append((gwh / layer.anchor_vec[a]) ** (1 / 3) / 2)  # power method
 
         # Class
@@ -469,7 +472,7 @@ def iou_calc1(boxes1, boxes2):
     # 因为两个boxes没有交集时，(right_down - left_up) < 0，所以maximum可以保证当两个boxes没有交集时，它们之间的iou为0
     inter_section = np.maximum(right_down - left_up, 0.0)
     inter_area = inter_section[..., 0] * inter_section[..., 1]
-    union_area = boxes1_area + boxes2_area - inter_area
+    union_area = boxes1_area + 1e-16 + boxes2_area - inter_area
     IOU = 1.0 * inter_area / union_area
     return IOU
 
@@ -528,10 +531,6 @@ def nms(prediction, score_threshold=0.5, iou_threshold=0.4, sigma=0.3, method='n
             output[image_i] = best_bboxes
 
     return output
-
-def get_yolo_layers(model):
-    bool_vec = [x['type'] == 'yolo' for x in model.module_defs]
-    return [i for i, x in enumerate(bool_vec) if x]  # [82, 94, 106] for yolov3
 
 
 def strip_optimizer_from_checkpoint(filename='weights/best.pt'):
