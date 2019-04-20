@@ -94,7 +94,7 @@ def train(
     t = time.time()
     # model_info(model)
     nB = len(dataloader)
-    n_burnin = 1000  # burn-in batches
+    n_burnin = nB  # burn-in batches
     for epoch in range(start_epoch, epochs):
         model.train()
         print(('\n%8s%12s' + '%10s' * 7) % ('Epoch', 'Batch', 'xy', 'wh', 'conf', 'cls', 'total', 'nTargets', 'time'))
