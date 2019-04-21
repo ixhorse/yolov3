@@ -10,7 +10,7 @@ try:
 except ImportError:
     import xml.etree.ElementTree as ET
 
-from utils.datasets import LoadImagesAndLabels
+from .datasets import LoadImagesAndLabels
 
 class VOCDetection(LoadImagesAndLabels):
 

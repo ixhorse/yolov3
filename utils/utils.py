@@ -285,7 +285,7 @@ def compute_loss(p, targets):  # predictions, targets
             tconf[b, a, gj, gi] = 1  # conf
             ignore_mask[ignore_b, ignore_anchor, ignore_gj, ignore_gi] = 0
 
-            lxy += (k * 8) * MSE(torch.sigmoid(pi[..., 0:2)], txy[i])  # xy loss  
+            lxy += (k * 8) * MSE(torch.sigmoid(pi[..., 0:2]), txy[i])  # xy loss  
             lwh += (k * 4) * SML1(pi[..., 2:4], twh[i])  # wh yolo loss
             lcls += (k * 1) * CE(pi[..., 5:], tcls[i])  # class_conf loss
 

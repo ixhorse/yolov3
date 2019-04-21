@@ -3,9 +3,9 @@ import time
 from sys import platform
 
 from models import *
-from utils.datasets import *
+from data.datasets import *
 from utils.utils import *
-from utils.dataset_voc import VOCDetection
+from data.dataset_voc import VOCDetection
 import pdb
 
 def detect(

@@ -6,8 +6,7 @@ from tqdm import tqdm
 from pathlib import Path
 
 from models import *
-from utils.datasets import *
-from utils.dataset_voc import VOCDetection
+from data.dataset_voc import VOCDetection
 from utils.utils import *
 from eval.voc_eval import *
 import pdb
