@@ -1,11 +1,13 @@
 import argparse
 import time
+import shutil
 from sys import platform
 
 from models import *
-from utils.datasets import *
+from data.datasets import *
 from utils.utils import *
-from utils.dataset_voc import VOCDetection
+from data.dataset_voc import VOCDetection
+
 import pdb
 
 def detect(
@@ -54,9 +56,7 @@ def detect(
 
         # Get detections
         img = torch.from_numpy(img).unsqueeze(0).to(device)
-        if ONNX_EXPORT:
-            torch.onnx.export(model, img, 'weights/model.onnx', verbose=True)
-            return
+        
         pred, _ = model(img)
         # detections = non_max_suppression(pred, conf_thres, nms_thres)[0]
         detections = nms(pred, conf_thres, nms_thres, method='nms')[0]

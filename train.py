@@ -5,11 +5,10 @@ import torch
 from torch.utils.data import DataLoader
 from torch.optim import SGD, lr_scheduler
 
-import test  # Import test.py to get mAP after each epoch
+import test  # Import test.py to get mAP
 from models import *
-from utils.datasets import *
 from utils.utils import *
-from utils.dataset_voc import VOCDetection
+from data.dataset_voc import VOCDetection
 
 from pprint import pprint
 import pdb

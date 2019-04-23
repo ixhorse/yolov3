@@ -6,8 +6,7 @@ from tqdm import tqdm
 from pathlib import Path
 
 from models import *
-from utils.datasets import *
-from utils.dataset_voc import VOCDetection
+from data.dataset_voc import VOCDetection
 from utils.utils import *
 from eval.voc_eval import *
 import pdb
@@ -30,12 +29,10 @@ def test(
 
         # Load weights
         if weights.endswith('.pt'):  # pytorch format
-            model.load_state_dict(torch.load(weights, map_location=device)['model'])
+            model.load_state_dict(torch.load(weights, map_location=device)['model'], strict=False)
         else:  # darknet format
             _ = load_darknet_weights(model, weights)
 
-        if torch.cuda.device_count() > 1:
-            model = nn.DataParallel(model)
     else:
         device = next(model.parameters()).device  # get model device
 
@@ -113,7 +110,7 @@ if __name__ == '__main__':
     parser.add_argument('--img-size', type=int, default=416, help='size of each image dimension')
     opt = parser.parse_args()
     print(opt, end='\n\n')
-
+    
     with torch.no_grad():
         APs, mAP = test(
             opt.cfg,
