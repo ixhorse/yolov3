@@ -265,12 +265,11 @@ def compute_loss(p, targets):  # predictions, targets
     lxy, lwh, lcls, lconf = FT([0]), FT([0]), FT([0]), FT([0])
     txy, twh, tcls, indices, ignores = targets
 
-    device = p[0].device
     MSE = nn.MSELoss()
     CE = nn.CrossEntropyLoss()
     SML1 = nn.SmoothL1Loss()
     xBCE = nn.BCEWithLogitsLoss()
-    FL = FocalLoss(gamma=2, alpha=0.75)
+    FL = FocalLoss(gamma=2, alpha=0.85)
 
     # Compute losses
     # gp = [x.numel() for x in tconf]  # grid points
@@ -292,10 +291,9 @@ def compute_loss(p, targets):  # predictions, targets
             lwh += (k * 4) * MSE(pi[..., 2:4], twh[i])  # wh yolo loss
             lcls += (k * 1) * CE(pi[..., 5:], tcls[i])  # class_conf loss
 
-        
-        BCE = nn.BCEWithLogitsLoss(weight=ignore_mask)
-        lconf += (k * 64) * BCE(pi0[..., 4], tconf)
-        # lconf += (k * 256) * FL(torch.sigmoid(pi0[..., 4]), tconf, ignore_mask)
+        # BCE = nn.BCEWithLogitsLoss(weight=ignore_mask)
+        # lconf += (k * 64) * BCE(pi0[..., 4], tconf)
+        lconf += (k * 256) * FL(torch.sigmoid(pi0[..., 4]), tconf, ignore_mask)
     loss = lxy + lwh + lconf + lcls
 
     # Add to dictionary
