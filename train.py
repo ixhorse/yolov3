@@ -9,6 +9,7 @@ import test  # Import test.py to get mAP
 from models import *
 from utils.utils import *
 from data.dataset_voc import VOCDetection
+from data.dataset_tt100k import TT100KDetection
 
 from pprint import pprint
 import pdb
@@ -79,7 +80,9 @@ def train(
     scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[50, 90], gamma=0.1, last_epoch=start_epoch - 1)
 
     # Dataset
-    train_dataset = VOCDetection(root=os.path.join('~', 'data', 'VOCdevkit'), img_size=img_size, mode='train')
+    # train_dataset = VOCDetection(root=os.path.join('~', 'data', 'VOCdevkit'), img_size=img_size, mode='train')
+    train_dataset = TT100KDetection(root=os.path.join('~', 'data', 'TT100K', 'TT100K_chip_voc'), 
+                                    img_size=img_size, mode='train')
 
     # Dataloader
     dataloader = DataLoader(train_dataset,
@@ -118,10 +121,10 @@ def train(
                 continue
 
             # SGD burn-in
-            if epoch == 0 and i <= n_burnin:
-                lr = lr0 * (i / n_burnin) ** 4
-                for x in optimizer.param_groups:
-                    x['lr'] = lr
+            # if epoch == 0 and i <= n_burnin:
+            #     lr = lr0 * (i / n_burnin) ** 4
+            #     for x in optimizer.param_groups:
+            #         x['lr'] = lr
 
             optimizer.zero_grad()
             # Run model
@@ -163,9 +166,10 @@ def train(
                     'model': model.module.state_dict() if type(model) is nn.parallel.DataParallel else model.state_dict(),
                     'optimizer': optimizer.state_dict()}
         if epoch % 5 == 0:
-            torch.save(checkpoint, 'weights/epoch_%03d.pt' % epoch)
+            torch.save(checkpoint, 'weights/epoch_tt100k_%03d.pt' % epoch)
 
-        if epoch > 9 and epoch % 10 == 0:
+        # if epoch > 9 and epoch % 10 == 0:
+        if True:
             with torch.no_grad():
                 APs, mAP = test.test(cfg, weights=None, batch_size=32, img_size=img_size, model=model)
                 pprint(APs)
