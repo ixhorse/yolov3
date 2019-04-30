@@ -2,6 +2,7 @@ import argparse
 import time
 import json
 import shutil
+from tqdm import tqdm
 from sys import platform
 
 from models import *
@@ -49,14 +50,23 @@ def detect(
     model.to(device).eval()
 
     # Set Dataloader
+    root_dir = '~/data/TT100K/TT100K_chip_voc'
+    root_dir = os.path.expanduser(root_dir)
+    list_file = os.path.join(root_dir, 'ImageSets/Main/test.txt')
+    image_dir = os.path.join(root_dir, 'JPEGImages')
+    with open(list_file, 'r') as f:
+        images = [x.strip() for x in f.readlines()]
+    images = [os.path.join(image_dir, x+'.jpg') for x in images]
+
     dataloader = LoadImages(images, img_size=img_size)
 
     # Get classes and colors
     classes = TT100KDetection.CLASSES
     colors = [[random.randint(0, 255) for _ in range(3)] for _ in range(len(classes))]
 
+    save_images = False
     results = dict()
-    for i, (path, img, im0, vid_cap) in enumerate(dataloader):
+    for i, (path, img, im0, vid_cap) in enumerate(tqdm(dataloader)):
         t = time.time()
         im_id = path.split('/')[-1][:-4]
         save_path = str(Path(output) / Path(path).name)
@@ -65,21 +75,28 @@ def detect(
         img = torch.from_numpy(img).unsqueeze(0).to(device)
         pred, _ = model(img)
         detections = nms(pred, conf_thres, nms_thres, method='nms')[0]
+        detections = detections[detections[:, 4] > 0.5]
 
         if detections is not None and len(detections) > 0:
             # Rescale boxes from 416 to true image size
             scale_coords(img_size, detections[:, :4], im0.shape).round()
 
-            # Print results to screen
-            for c in np.unique(detections[:, -1]):
-                n = (detections[:, -1] == c).sum()
-                print('%g %ss' % (n, classes[int(c)]), end=', ')
-
             results[im_id] = {'pred_box': detections[:,:4],
                            'pred_score': detections[:,4],
-                           'pred_label': [classes[int(i)] for i in detections[:,5]]}                
-
-        print('Done. (%.3fs)' % (time.time() - t))
+                           'pred_label': [classes[int(i)] for i in detections[:,5]]}
+            
+            # Add bbox to the image
+            if save_images:
+                # Print results to screen
+                for c in np.unique(detections[:, -1]):
+                    n = (detections[:, -1] == c).sum()
+                    print('%g %ss' % (n, classes[int(c)]), end=', ')
+                for *xyxy, conf, cls in detections:
+                    label = '%s %.2f' % (classes[int(cls)], conf)
+                    plot_one_box(xyxy, im0, label=label, color=colors[int(cls)])
+        if save_images:
+            cv2.imwrite(save_path, im0)
+            print('Done. (%.3fs)' % (time.time() - t))
 
     with open(output + '/results.json', 'w') as f:
         json.dump(results, f, cls=MyEncoder)

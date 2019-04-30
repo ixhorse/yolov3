@@ -56,10 +56,8 @@ def test(
     seen = 0
     pbar = tqdm(total=len(dataloader) * batch_size, desc='Computing mAP')
     for batch_i, (imgs, targets, shapes, img_paths) in enumerate(dataloader):
-        t = time.time()
         output, _ = model(imgs.to(device))
         # nms
-        # output = non_max_suppression(output, conf_thres=conf_thres, nms_thres=nms_thres)
         output = nms(output, conf_thres, nms_thres, method='nms')
 
         for si, detections in enumerate(output):

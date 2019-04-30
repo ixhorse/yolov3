@@ -18,7 +18,9 @@ class LoadImages():  # for inference
         vid_formats = ['.mov', '.avi', '.mp4']
 
         files = []
-        if os.path.isdir(path):
+        if isinstance(path, list):
+            files = path
+        elif os.path.isdir(path):
             files = sorted(glob.glob('%s/*.*' % path))
         elif os.path.isfile(path):
             files = [path]
@@ -40,6 +42,9 @@ class LoadImages():  # for inference
     def __iter__(self):
         self.count = 0
         return self
+
+    def __len__(self):
+        return len(self.path)
 
     def __next__(self):
         if self.count == self.nF:
@@ -68,7 +73,7 @@ class LoadImages():  # for inference
             self.count += 1
             img0 = cv2.imread(path)  # BGR
             assert img0 is not None, 'File Not Found ' + path
-            print('image %g/%g %s: ' % (self.count, self.nF, path), end='')
+            # print('image %g/%g %s: ' % (self.count, self.nF, path), end='')
 
         # Padded resize
         img, _, = letterbox(img0, None, height=self.height, mode='test')

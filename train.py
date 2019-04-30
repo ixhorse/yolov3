@@ -121,10 +121,10 @@ def train(
                 continue
 
             # SGD burn-in
-            # if epoch == 0 and i <= n_burnin:
-            #     lr = lr0 * (i / n_burnin) ** 4
-            #     for x in optimizer.param_groups:
-            #         x['lr'] = lr
+            if epoch == 0 and i <= n_burnin:
+                lr = lr0 * (i / n_burnin) ** 4
+                for x in optimizer.param_groups:
+                    x['lr'] = lr
 
             optimizer.zero_grad()
             # Run model
@@ -169,7 +169,7 @@ def train(
             torch.save(checkpoint, 'weights/epoch_tt100k_%03d.pt' % epoch)
 
         # if epoch > 9 and epoch % 10 == 0:
-        if True:
+        if False:
             with torch.no_grad():
                 APs, mAP = test.test(cfg, weights=None, batch_size=32, img_size=img_size, model=model)
                 pprint(APs)
