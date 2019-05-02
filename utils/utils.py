@@ -293,7 +293,7 @@ def compute_loss(p, targets):  # predictions, targets
 
         # BCE = nn.BCEWithLogitsLoss(weight=ignore_mask)
         # lconf += (k * 64) * BCE(pi0[..., 4], tconf)
-        lconf += (k * 256) * FL(torch.sigmoid(pi0[..., 4]), tconf, ignore_mask)
+        lconf += (k * 512) * FL(torch.sigmoid(pi0[..., 4]), tconf, ignore_mask)
     loss = lxy + lwh + lconf + lcls
 
     # Add to dictionary

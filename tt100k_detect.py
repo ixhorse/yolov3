@@ -49,14 +49,16 @@ def detect(
 
     model.to(device).eval()
 
+    tt100k = True
     # Set Dataloader
-    root_dir = '~/data/TT100K/TT100K_chip_voc'
-    root_dir = os.path.expanduser(root_dir)
-    list_file = os.path.join(root_dir, 'ImageSets/Main/test.txt')
-    image_dir = os.path.join(root_dir, 'JPEGImages')
-    with open(list_file, 'r') as f:
-        images = [x.strip() for x in f.readlines()]
-    images = [os.path.join(image_dir, x+'.jpg') for x in images]
+    if tt100k:
+        root_dir = '~/data/TT100K/TT100K_chip_voc'
+        root_dir = os.path.expanduser(root_dir)
+        list_file = os.path.join(root_dir, 'ImageSets/Main/test.txt')
+        image_dir = os.path.join(root_dir, 'JPEGImages')
+        with open(list_file, 'r') as f:
+            images = [x.strip() for x in f.readlines()]
+        images = [os.path.join(image_dir, x+'.jpg') for x in images]
 
     dataloader = LoadImages(images, img_size=img_size)
 
@@ -75,7 +77,7 @@ def detect(
         img = torch.from_numpy(img).unsqueeze(0).to(device)
         pred, _ = model(img)
         detections = nms(pred, conf_thres, nms_thres, method='nms')[0]
-        detections = detections[detections[:, 4] > 0.5]
+        detections = detections[detections[:, 4] > 0.6]
 
         if detections is not None and len(detections) > 0:
             # Rescale boxes from 416 to true image size
