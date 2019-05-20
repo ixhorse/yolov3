@@ -76,7 +76,7 @@ def train(
         model = torch.nn.DataParallel(model, device_ids=list(range(torch.cuda.device_count())))
 
     # Set scheduler
-    scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[50, 90], gamma=0.1, last_epoch=start_epoch - 1)
+    scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[120, 160], gamma=0.1, last_epoch=start_epoch - 1)
 
     # Dataset
     train_dataset = VOCDetection(root=os.path.join('~', 'data', 'VOCdevkit'), img_size=img_size, mode='train')

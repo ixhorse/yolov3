@@ -269,7 +269,7 @@ def compute_loss(p, targets):  # predictions, targets
     CE = nn.CrossEntropyLoss()
     SML1 = nn.SmoothL1Loss()
     xBCE = nn.BCEWithLogitsLoss()
-    FL = FocalLoss(gamma=2, alpha=0.85)
+    FL = FocalLoss(gamma=1, alpha=0.9)
 
     # Compute losses
     # gp = [x.numel() for x in tconf]  # grid points
@@ -289,7 +289,7 @@ def compute_loss(p, targets):  # predictions, targets
 
             lxy += (k * 8) * MSE(torch.sigmoid(pi[..., 0:2]), txy[i])  # xy loss  
             lwh += (k * 4) * MSE(pi[..., 2:4], twh[i])  # wh yolo loss
-            lcls += (k * 1) * CE(pi[..., 5:], tcls[i])  # class_conf loss
+            lcls += (k * 1) * CE(pi[..., 5:], tcls[i].long())  # class_conf loss
 
         # BCE = nn.BCEWithLogitsLoss(weight=ignore_mask)
         # lconf += (k * 64) * BCE(pi0[..., 4], tconf)
