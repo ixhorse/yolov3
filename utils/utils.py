@@ -11,6 +11,7 @@ import torch.nn as nn
 
 from utils import torch_utils
 from utils.focal_loss import FocalLoss
+from external.nms import nms as c_nms
 
 import pdb
 
@@ -392,7 +393,7 @@ def nms(prediction, score_threshold=0.5, iou_threshold=0.4, sigma=0.3, method='n
     假设NMS后剩下N个bbox，那么best_bboxes的shape为(N, 6)，存储格式为(xmin, ymin, xmax, ymax, score, class)
     其中(xmin, ymin, xmax, ymax)的大小都是相对于输入训练尺寸的，score = conf * prob，class是bbox所属类别的索引号
     """
-    prediction = prediction.cpu().numpy()
+    prediction = prediction.cpu().numpy().astype(np.float32)
     output = [np.array([]) for _ in range(len(prediction))]
     for image_i, pred in enumerate(prediction):
         # ignore conf < thresh
@@ -404,7 +405,7 @@ def nms(prediction, score_threshold=0.5, iou_threshold=0.4, sigma=0.3, method='n
         # From (center x, center y, width, height) to (x1, y1, x2, y2)
         pred[:, :4] = xywh2xyxy(pred[:, :4])
         # Detections ordered as (x1, y1, x2, y2, obj_conf * class_prob, class_pred)
-        detections = np.concatenate((pred[:, :4], (pred[:, 4]*class_prob)[:, np.newaxis], class_pred[:, np.newaxis]), 1)
+        detections = np.concatenate((pred[:, :4], (pred[:, 4]*class_prob)[:, np.newaxis], class_pred[:, np.newaxis]), 1).astype(np.float32)
         # sort by score 
         detections = detections[(-detections[:,4]).argsort()[:1000]]
         # Iterate through all predicted classes
@@ -414,23 +415,27 @@ def nms(prediction, score_threshold=0.5, iou_threshold=0.4, sigma=0.3, method='n
         for cls in unique_labels:
             cls_mask = (detections[:, 5] == cls)
             cls_bboxes = detections[cls_mask]
-            while len(cls_bboxes) > 0:
-                best_bbox = cls_bboxes[0]
-                best_bboxes.append(best_bbox)
-                cls_bboxes = cls_bboxes[1:]
-                iou = iou_calc1(best_bbox[np.newaxis, :4], cls_bboxes[:, :4])
-                assert method in ['nms', 'soft-nms']
-                if method == 'nms':
-                    iou_mask = iou > iou_threshold
-                    weight = np.ones((len(iou),), dtype=np.float32)
-                    weight[iou_mask] = 0.0
-                if method == 'soft-nms':
-                    weight = np.exp(-(1.0 * iou ** 2 / sigma))
-                cls_bboxes[:, 4] = cls_bboxes[:, 4] * weight
-                score_mask = cls_bboxes[:, 4] > score_threshold
-                cls_bboxes = cls_bboxes[score_mask]
+            
+            # c_code from faster-rcnn
+            keep = c_nms(cls_bboxes, iou_threshold)
+            best_bboxes.append(cls_bboxes[keep])
+
+            # python code
+            # while len(cls_bboxes) > 0:
+            #     best_bbox = cls_bboxes[0]
+            #     best_bboxes.append(best_bbox)
+            #     cls_bboxes = cls_bboxes[1:]
+            #     iou = iou_calc1(best_bbox[np.newaxis, :4], cls_bboxes[:, :4])
+            #     # nms
+            #     iou_mask = iou > iou_threshold
+            #     weight = np.ones((len(iou),), dtype=np.float32)
+            #     weight[iou_mask] = 0.0
+            #     cls_bboxes[:, 4] = cls_bboxes[:, 4] * weight
+            #     score_mask = cls_bboxes[:, 4] > score_threshold
+            #     cls_bboxes = cls_bboxes[score_mask]
+
         if len(best_bboxes) > 0:
-            best_bboxes = np.array(best_bboxes)
+            best_bboxes = np.vstack(best_bboxes)
             # Add max detections to outputs
             output[image_i] = best_bboxes
 
