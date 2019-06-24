@@ -411,14 +411,14 @@ def nms(prediction, score_threshold=0.5, iou_threshold=0.4, sigma=0.3, method='n
         # Iterate through all predicted classes
         unique_labels = np.unique(detections[:, -1])
 
-        best_bboxes = []
+        best_bboxes = dict()
         for cls in unique_labels:
             cls_mask = (detections[:, 5] == cls)
             cls_bboxes = detections[cls_mask]
             
             # c_code from faster-rcnn
             keep = c_nms(cls_bboxes, iou_threshold)
-            best_bboxes.append(cls_bboxes[keep])
+            best_bboxes[cls] = cls_bboxes[keep]
 
             # python code
             # while len(cls_bboxes) > 0:
@@ -434,10 +434,7 @@ def nms(prediction, score_threshold=0.5, iou_threshold=0.4, sigma=0.3, method='n
             #     score_mask = cls_bboxes[:, 4] > score_threshold
             #     cls_bboxes = cls_bboxes[score_mask]
 
-        if len(best_bboxes) > 0:
-            best_bboxes = np.vstack(best_bboxes)
-            # Add max detections to outputs
-            output[image_i] = best_bboxes
+        output[image_i] = best_bboxes
 
     return output
 

@@ -53,35 +53,37 @@ def test(
     os.makedirs(det_results_path)
 
     model.eval()
-    seen = 0
     pbar = tqdm(total=len(dataloader) * batch_size, desc='Computing mAP')
+    bbox_mess_dict = dict()
     for batch_i, (imgs, targets, shapes, img_paths) in enumerate(dataloader):
         output, _ = model(imgs.to(device))
         # nms
-        # output = non_max_suppression(output, conf_thres=conf_thres, nms_thres=nms_thres)
         output = nms(output, conf_thres, nms_thres, method='nms')
 
         for si, detections in enumerate(output):
-            seen += 1
-            if len(detections) == 0:
-                continue
-
-            # Rescale boxes from 416 to true image size
-            scale_coords(img_size, detections[:, :4], shapes[si]).round()
-
             image_ind = os.path.split(img_paths[si])[-1][:-4]
-            for bbox in detections:
-                coor = bbox[:4]
-                score = bbox[4]
-                class_ind = int(bbox[5])
-                class_name = classes[class_ind]
-                score = score = '%.4f' % score
-                xmin, ymin, xmax, ymax = map(str, coor)
-                bbox_mess = ' '.join([image_ind, score, xmin, ymin, xmax, ymax]) + '\n'
-                with open(os.path.join(det_results_path, 'comp3_det_test_' + class_name + '.txt'), 'a') as f:
-                    f.write(bbox_mess)
-        
+            for cls, bboxes in detections.items():
+                # Rescale boxes from 416 to true image size
+                scale_coords(img_size, bboxes[:, :4], shapes[si]).round()
+
+                for bbox in bboxes:
+                    coor = bbox[:4]
+                    score = bbox[4]
+                    class_ind = int(bbox[5])
+                    score = score = '%.4f' % score
+                    xmin, ymin, xmax, ymax = map(str, coor)
+                    bbox_mess = ' '.join([image_ind, score, xmin, ymin, xmax, ymax]) + '\n'
+                    if class_ind in bbox_mess_dict:
+                        bbox_mess_dict[class_ind].append(bbox_mess)
+                    else:
+                        bbox_mess_dict[class_ind] = [bbox_mess]
         pbar.update(batch_size)
+
+    for cls, bbox_mess in bbox_mess_dict.items():
+        class_name = classes[cls]
+        with open(os.path.join(det_results_path, 'comp3_det_test_' + class_name + '.txt'), 'a') as f:
+            f.writelines(bbox_mess)
+   
     pbar.close()
 
     filename = os.path.join('eval', 'results', 'VOC2007', 'Main', 'comp3_det_test_{:s}.txt')
