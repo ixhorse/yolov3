@@ -76,7 +76,7 @@ def train(
         model = torch.nn.DataParallel(model, device_ids=list(range(torch.cuda.device_count())))
 
     # Set scheduler
-    scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[120, 160], gamma=0.1, last_epoch=start_epoch - 1)
+    scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[60, 80], gamma=0.1, last_epoch=start_epoch - 1)
 
     # Dataset
     train_dataset = VOCDetection(root=os.path.join('~', 'data', 'VOCdevkit'), img_size=img_size, mode='train')
@@ -96,7 +96,8 @@ def train(
     n_burnin = nB  # burn-in batches
     for epoch in range(start_epoch, epochs):
         model.train()
-        print(('\n%8s%12s' + '%10s' * 7) % ('Epoch', 'Batch', 'xy', 'wh', 'conf', 'cls', 'total', 'nTargets', 'time'))
+        print(('\n%8s%12s' + '%10s' * 8) % 
+            ('Epoch', 'Batch', 'xy', 'wh', 'conf', 'cls', 'total', 'nTargets', 'time', 'size'))
 
         # Update scheduler
         scheduler.step()
@@ -140,18 +141,17 @@ def train(
             for key, val in loss_dict.items():
                 mloss[key] = (mloss[key] * i + val) / (i + 1)
 
-            s = ('%8s%12s' + '%10.3g' * 7) % (
+            s = ('%8s%12s' + '%10.3g' * 8) % (
                 '%g/%g' % (epoch, epochs - 1), '%g/%g' % (i, nB - 1),
                 mloss['xy'], mloss['wh'], mloss['conf'], mloss['cls'],
-                mloss['total'], nt, time.time() - t)
+                mloss['total'], nt, time.time() - t, train_dataset.img_size)
             t = time.time()
             if i % 30 == 0:
                 print(s)
 
             # Multi-Scale training (320 - 608 pixels) every 10 batches
             if multi_scale and (i + 1) % 10 == 0:
-                dataset.img_size = random.choice(range(10, 20)) * 32
-                print('multi_scale img_size = %g' % dataset.img_size)
+                train_dataset.img_size = random.choice(range(10, 20)) * 32
 
         # Update best loss
         if mloss['total'] < best_loss:

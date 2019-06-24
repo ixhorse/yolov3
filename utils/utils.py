@@ -390,7 +390,7 @@ def nms(prediction, score_threshold=0.5, iou_threshold=0.4, sigma=0.3, method='n
     :param prediction:
     (x, y, w, h, conf, c*N)
     :return: best_bboxes
-    假设NMS后剩下N个bbox，那么best_bboxes的shape为(N, 6)，存储格式为(xmin, ymin, xmax, ymax, score, class)
+    那么best_bboxes的shape为(N, 6)，存储格式为(xmin, ymin, xmax, ymax, score, class)
     其中(xmin, ymin, xmax, ymax)的大小都是相对于输入训练尺寸的，score = conf * prob，class是bbox所属类别的索引号
     """
     prediction = prediction.cpu().numpy().astype(np.float32)
